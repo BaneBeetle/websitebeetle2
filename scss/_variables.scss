@@ -3,9 +3,11 @@
 
 $font-1: 'Outfit', sans-serif;
 
-$dark: rgba(0, 0, 0, 1);
+$dark: rgba(10, 25, 47, 1);
 $light: rgba(255, 255, 255, 1);
-$accent: rgba(255, 152, 0, 1);
+$accent: rgba(0, 122, 255, 1); /* Changed from orange to blue */
+$accent-light: rgba(64, 156, 255, 1); /* Added lighter blue for hover states */
+$accent-dark: rgba(0, 90, 200, 1); /* Added darker blue for active states */
 
 $dt-2: rgba(0, 0, 0, .02);
 $dt-5: rgba(0, 0, 0, .05);
