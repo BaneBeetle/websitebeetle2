@@ -812,6 +812,7 @@ backgrounds
 
 .mil-dark-bg1 {
   position: relative;
+  background-color: black;
 }
 .mil-dark-bg {
   position: relative;
@@ -4234,4 +4235,8 @@ html.is-animating .mil-menu-frame {
   opacity: 0;
   -webkit-transition-delay: 0.3s;
           transition-delay: 0.3s;
+}
+
+.move-right {
+  margin-left: 20px;
 }
