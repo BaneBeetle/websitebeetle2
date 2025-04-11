@@ -391,7 +391,7 @@ a {
 }
 
 .mil-muted {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 1);
 }
 
 .mil-dark {
@@ -399,11 +399,11 @@ a {
 }
 
 .mil-light-soft {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 1);
 }
 
 .mil-dark-soft {
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 1);
 }
 
 .mil-marker {
@@ -809,8 +809,14 @@ breadcrumbs
 backgrounds
 
 ------------------------------------------- */
+
+.mil-dark-bg1 {
+  position: relative;
+}
 .mil-dark-bg {
   position: relative;
+  background: url("../img/brian/double_point_brian.jpg") no-repeat center center;
+  background-size: cover;
 }
 .mil-dark-bg:before {
   content: "";
@@ -819,8 +825,9 @@ backgrounds
   position: absolute;
   pointer-events: none;
   z-index: 2;
-  -webkit-backdrop-filter: invert(100%);
-          backdrop-filter: invert(100%);
+  background: rgba(0, 0, 0, 0.2);
+  /*-webkit-backdrop-filter: invert(100%);
+          backdrop-filter: invert(100%);*/
 }
 .mil-dark-bg .mi-invert-fix {
   height: 100%;
