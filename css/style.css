@@ -826,7 +826,7 @@ backgrounds
   position: absolute;
   pointer-events: none;
   z-index: 2;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.1);
   /*-webkit-backdrop-filter: invert(100%);
           backdrop-filter: invert(100%);*/
 }
@@ -4240,3 +4240,4 @@ html.is-animating .mil-menu-frame {
 .move-right {
   margin-left: 20px;
 }
+
