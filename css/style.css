@@ -4240,4 +4240,9 @@ html.is-animating .mil-menu-frame {
 .move-right {
   margin-left: 20px;
 }
-
+#resume {
+  display: flex;
+  justify-content: center; /* centers horizontally */
+  align-items: center;     /* centers vertically */
+  min-height: 100vh;       /* makes the section at least full viewport height */
+}
