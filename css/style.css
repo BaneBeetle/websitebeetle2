@@ -4180,6 +4180,13 @@ page transitions
   -webkit-transition-delay: 0.3s;
           transition-delay: 0.3s;
 }
+
+.mil-main-transition1 { 
+  -webkit-transition: 0.6s;
+  transition: 0.6s;
+}
+
+
 .mil-main-transition .mil-animation-frame {
   opacity: 1;
   margin-top: 0;
