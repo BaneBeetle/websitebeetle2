@@ -127,44 +127,51 @@ $(function () {
     });
 
     /***************************
-clone hidden elements into their slots, but only once
+append exactly one hidden‐template per slot
 ***************************/
 function appendHiddenElements() {
-    // arrow: only clone if .mil-arrow-place has no arrow yet
-    $(".mil-arrow-place").each(function () {
-      if ($(this).find(".mil-arrow").length === 0) {
-        $(".mil-arrow").clone().appendTo(this);
-      }
+    // 1) Arrows
+    $(".mil-arrow-place").each(function() {
+      const $slot = $(this);
+      $slot.empty();                                      // remove any old copies
+      $(".mil-hidden-elements .mil-arrow")               // find the original
+        .clone()                                         // clone it
+        .appendTo($slot);                                // append exactly one
     });
   
-    // dodecahedron: only clone if this slot is empty
-    $(".mil-animation").each(function () {
-      if ($(this).find(".mil-dodecahedron").length === 0) {
-        $(".mil-dodecahedron").clone().appendTo(this);
-      }
+    // 2) Dodecahedrons
+    $(".mil-animation").each(function() {
+      const $slot = $(this);
+      $slot.find(".mil-dodecahedron").remove();          // clear out old
+      $(".mil-hidden-elements .mil-dodecahedron")       // original template
+        .clone()
+        .appendTo($slot);
     });
   
-    // lines: only clone if this slot is empty
-    $(".mil-lines-place").each(function () {
-      if ($(this).find(".mil-lines").length === 0) {
-        $(".mil-lines").clone().appendTo(this);
-      }
+    // 3) Lines
+    $(".mil-lines-place").each(function() {
+      const $slot = $(this);
+      $slot.empty();
+      $(".mil-hidden-elements .mil-lines")
+        .clone()
+        .appendTo($slot);
     });
   
-    // current‐page label: only clone once
-    if ($(".mil-current-page").children().length === 0) {
-      $(".mil-main-menu ul li.mil-active > a").clone().appendTo(".mil-current-page");
-    }
+    // 4) Current‐page label
+    const $current = $(".mil-current-page").empty();
+    $(".mil-main-menu ul li.mil-active > a")
+      .clone()
+      .appendTo($current);
   }
   
-  // initial load
+  // run once on initial load
   $(document).ready(appendHiddenElements);
   
-  // on every Swup swap
-  document.addEventListener("swup:contentReplaced", function () {
+  // run after every Swup swap
+  document.addEventListener("swup:contentReplaced", function() {
     appendHiddenElements();
   
-    // your existing scroll‐top + progress etc
+    // your existing scroll‐top + progress bar re‐init:
     $('html, body').scrollTop(0);
     gsap.to('.mil-progress', {
       height: '100%',
@@ -172,6 +179,7 @@ function appendHiddenElements() {
       scrollTrigger: { scrub: 0.3 }
     });
   });
+  
 
     /***************************
     accordion
