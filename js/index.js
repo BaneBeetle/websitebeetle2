@@ -126,60 +126,58 @@ $(function () {
         }, 400);
     });
 
-    /***************************
-append exactly one hidden‐template per slot
-***************************/
-function appendHiddenElements() {
-    // 1) Arrows
-    $(".mil-arrow-place").each(function() {
-      const $slot = $(this);
-      $slot.empty();                                      // remove any old copies
-      $(".mil-hidden-elements .mil-arrow")               // find the original
-        .clone()                                         // clone it
-        .appendTo($slot);                                // append exactly one
-    });
-  
-    // 2) Dodecahedrons
-    $(".mil-animation").each(function() {
-      const $slot = $(this);
-      $slot.find(".mil-dodecahedron").remove();          // clear out old
-      $(".mil-hidden-elements .mil-dodecahedron")       // original template
-        .clone()
-        .appendTo($slot);
-    });
-  
-    // 3) Lines
-    $(".mil-lines-place").each(function() {
-      const $slot = $(this);
-      $slot.empty();
-      $(".mil-hidden-elements .mil-lines")
-        .clone()
-        .appendTo($slot);
-    });
-  
-    // 4) Current‐page label
-    const $current = $(".mil-current-page").empty();
-    $(".mil-main-menu ul li.mil-active > a")
-      .clone()
-      .appendTo($current);
-  }
-  
-  // run once on initial load
-  $(document).ready(appendHiddenElements);
-  
-  // run after every Swup swap
-  document.addEventListener("swup:contentReplaced", function() {
-    appendHiddenElements();
-  
-    // your existing scroll‐top + progress bar re‐init:
-    $('html, body').scrollTop(0);
-    gsap.to('.mil-progress', {
-      height: '100%',
-      ease: 'sine',
-      scrollTrigger: { scrub: 0.3 }
-    });
-  });
-  
+    function appendHiddenElements() {
+        // 1) Arrows – only knock out the SVG, leave the <span> text intact
+        $(".mil-arrow-place").each(function() {
+          const $slot = $(this);
+          // remove any old arrow SVG
+          $slot.children("svg.mil-arrow").remove();
+          // clone exactly one fresh SVG into the link
+          $(".mil-hidden-elements svg.mil-arrow")
+            .clone()
+            .appendTo($slot);
+        });
+      
+        // 2) Dodecahedrons
+        $(".mil-animation").each(function() {
+          const $slot = $(this);
+          $slot.find(".mil-dodecahedron").remove();
+          $(".mil-hidden-elements .mil-dodecahedron")
+            .clone()
+            .appendTo($slot);
+        });
+      
+        // 3) Lines
+        $(".mil-lines-place").each(function() {
+          const $slot = $(this);
+          $slot.children("svg.mil-lines").remove();
+          $(".mil-hidden-elements .mil-lines")
+            .clone()
+            .appendTo($slot);
+        });
+      
+        // 4) Current‐page label
+        const $current = $(".mil-current-page").empty();
+        $(".mil-main-menu ul li.mil-active > a")
+          .clone()
+          .appendTo($current);
+      }
+      
+      // initial run
+      $(document).ready(appendHiddenElements);
+      
+      // on every Swup swap
+      document.addEventListener("swup:contentReplaced", function() {
+        appendHiddenElements();
+      
+        $('html, body').scrollTop(0);
+        gsap.to('.mil-progress', {
+          height: '100%',
+          ease: 'sine',
+          scrollTrigger: { scrub: 0.3 }
+        });
+      });
+      
 
     /***************************
     accordion
