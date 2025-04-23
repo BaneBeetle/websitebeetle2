@@ -127,14 +127,36 @@ $(function () {
     });
 
     /***************************
-    append
+    clone hidden elements into their slots
     ***************************/
-    $(document).ready(function () {
+    function appendHiddenElements() {
         $(".mil-arrow").clone().appendTo(".mil-arrow-place");
         $(".mil-dodecahedron").clone().appendTo(".mil-animation");
         $(".mil-lines").clone().appendTo(".mil-lines-place");
-        $(".mil-main-menu ul li.mil-active > a").clone().appendTo(".mil-current-page");
+        $(".mil-main-menu ul li.mil-active > a")
+        .clone()
+        .appendTo(".mil-current-page");
+    }
+
+    // on initial page load
+    $(document).ready(function () {
+        appendHiddenElements();
     });
+
+    // every time Swup swaps in new content...
+    document.addEventListener("swup:contentReplaced", function () {
+        // re-run our clones
+        appendHiddenElements();
+
+        // your existing “scroll to top” + progress-bar reinit:
+        $('html, body').scrollTop(0);
+        gsap.to('.mil-progress', {
+            height: '100%',
+            ease: 'sine',
+            scrollTrigger: { scrub: 0.3 }
+        });
+    });
+
 
     /***************************
     accordion
