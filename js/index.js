@@ -574,15 +574,18 @@ $(function () {
     ------------------------------------------------------------
     ----------------------------------------------------------*/
     document.addEventListener("swup:contentReplaced", function () {
-        $('html, body').animate({
-            scrollTop: 0,
-        }, 0);
+        // scroll back to top
+        $('html, body').animate({ scrollTop: 0 }, 0);
+   
+        // redraw the progress bar
         gsap.to('.mil-progress', {
             height: '100%',
             ease: 'sine',
-            scrollTrigger: {
-                scrub: 0.3
-            }
+            scrollTrigger: { scrub: 0.3 }
         });
+   
+   +    // ← NEW: make ScrollTrigger re-calc all triggers on the newly swapped content
+   +    ScrollTrigger.refresh();
     });
+   
 });
