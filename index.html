@@ -140,17 +140,19 @@
 
         <!-- content -->
         <div class="mil-content">
-            <div id="swupMain" class="mil-main-transition">
 
+            <!-- ★ persistent animation-frame now sits OUTSIDE swupMain -->
+            <div class="mil-animation-frame">
+                <div class="mil-animation mil-position-1 mil-scale" …></div>
+                <div class="mil-animation mil-position-2 mil-scale" …></div>
+                <div class="mil-animation mil-position-3 mil-scale" …></div>
+            </div>
+    
+            <div id="swupMain" class="mil-main-transition">
                 <!-- banner -->
                 <section class="mil-banner mil-dark-bg">
                     <div class="mi-invert-fix">
-                        <div class="mil-animation-frame">
-                            <div class="mil-animation mil-position-1 mil-scale" data-value-1="7" data-value-2="1.6"></div>
-                            <div class="mil-animation mil-position-2 mil-scale" data-value-1="4" data-value-2="1"></div>
-                            <div class="mil-animation mil-position-3 mil-scale" data-value-1="1.2" data-value-2=".1"></div>
-                        </div>
-
+                        <!-- animation-frame removed from here -->
                         <div class="mil-gradient"></div>
 
                         <div class="container">
