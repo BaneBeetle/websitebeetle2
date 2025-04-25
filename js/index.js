@@ -176,6 +176,8 @@ $(function () {
           ease: 'sine',
           scrollTrigger: { scrub: 0.3 }
         });
+        // auto-close overlay when Swup swaps content
+        $('.mil-menu-frame, .mil-menu-btn').removeClass('mil-active');
       });
       
 
