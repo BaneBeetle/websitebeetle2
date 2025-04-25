@@ -628,7 +628,31 @@ $(function () {
             ease: 'sine',
             scrollTrigger: { scrub: 0.3 }
         });
-   
+        // reset scroll to top
+  $('html, body').scrollTop(0);
+
+  // re-run scroll progress GSAP
+  gsap.to('.mil-progress', {
+    height: '100%',
+    ease: 'sine',
+    scrollTrigger: { scrub: 0.3 }
+  });
+
+  // ✅ re-init Swiper if it's on this page
+  if ($('.mil-portfolio-slider').length) {
+    new Swiper('.mil-portfolio-slider', {
+      speed: 800,
+      parallax: true,
+      pagination: {
+        el: '.swiper-portfolio-pagination',
+        type: 'fraction'
+      },
+      navigation: {
+        nextEl: '.mil-portfolio-next',
+        prevEl: '.mil-portfolio-prev'
+      }
+    });
+  }
    +    // ← NEW: make ScrollTrigger re-calc all triggers on the newly swapped content
    +    ScrollTrigger.refresh();
     });
