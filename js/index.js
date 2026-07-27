@@ -559,9 +559,6 @@ $(function () {
         spaceBetween: 0,
         speed: 800,
         parallax: true,
-        mousewheel: {
-            enable: true
-        },
         navigation: {
             nextEl: '.mil-portfolio-next',
             prevEl: '.mil-portfolio-prev',
@@ -653,8 +650,8 @@ $(function () {
       }
     });
   }
-   +    // ← NEW: make ScrollTrigger re-calc all triggers on the newly swapped content
-   +    ScrollTrigger.refresh();
+        // make ScrollTrigger re-calc all triggers on the newly swapped content
+        ScrollTrigger.refresh();
     });
    
 });
