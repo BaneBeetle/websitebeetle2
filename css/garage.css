@@ -1,0 +1,404 @@
+/* Brian's Garage.
+   One theme: the room is a garage at night, so the page is dark, always.
+   One accent: Interlagos Blue, pulled off the car itself, used for every
+   highlight in the room and every highlight in the DOM.
+   One radius: zero. Shut lines and floor stencils are straight edges. */
+
+@font-face{font-family:"Archivo";src:url("../fonts/archivo-var.woff2") format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Archivo Black";src:url("../fonts/archivo-black.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../fonts/jetbrains-mono-var.woff2") format("woff2");font-weight:100 800;font-display:swap}
+
+:root{
+  color-scheme:dark;
+  --void:#080a0e;
+  --floor:#11141a;
+  --panel:#161a21;
+  --panel-2:#1d222b;
+  --line:#2b323d;
+  --line-soft:#20262f;
+  --ink:#e9edf3;
+  --ink-2:#a7b0bd;
+  --ink-3:#6f7885;
+  --blue:#3b6fd4;
+  --blue-lit:#7aa7ff;
+  --blue-deep:#16305f;
+  --warn:#e8a13c;
+
+  --sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --display:"Archivo Black","Archivo",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+
+  --gut:clamp(20px,4vw,56px);
+  --ease:cubic-bezier(.16,1,.3,1);
+
+  --z-doc:1; --z-stage:2; --z-hud:5; --z-panel:6; --z-boot:9;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+html{background:var(--void);-webkit-text-size-adjust:100%}
+body{
+  background:var(--void);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  min-height:100dvh;
+}
+img{max-width:100%;height:auto;display:block}
+a{color:var(--blue-lit);text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{color:#a5c4ff}
+h1,h2,h3,h4{margin:0;font-weight:400;letter-spacing:-.02em}
+p{margin:0 0 1em}
+:focus-visible{outline:2px solid var(--blue-lit);outline-offset:3px}
+::selection{background:var(--blue);color:#fff}
+
+.skip{position:absolute;left:-9999px;top:0;z-index:99;background:var(--blue);color:#fff;padding:12px 18px}
+.skip:focus{left:12px;top:12px}
+
+/* ---------------------------------------------------------------- boot */
+/* The loader is the garage door. Progress raises the roller, because the
+   door opener is one of the projects this site is about. */
+.boot{
+  position:fixed;inset:0;z-index:var(--z-boot);
+  background:var(--void);
+  display:grid;place-items:center;
+  overflow:hidden;
+}
+.boot[hidden]{display:none}
+.boot-door{
+  position:absolute;left:0;right:0;top:0;
+  height:100%;
+  background:
+    repeating-linear-gradient(to bottom,
+      #171b22 0px,#171b22 34px,
+      #0f1319 34px,#0f1319 38px,
+      #1b2029 38px,#1b2029 42px);
+  border-bottom:3px solid #262d38;
+  box-shadow:0 24px 60px rgba(0,0,0,.8);
+  transform:translate3d(0,calc(var(--door,0) * -101%),0);
+  will-change:transform;
+}
+.boot-door::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:180px;
+  background:linear-gradient(to bottom,transparent,rgba(0,0,0,.55));
+}
+.boot-inner{
+  position:relative;text-align:left;
+  padding:var(--gut);width:min(760px,92vw);
+}
+.boot-name{
+  font-family:var(--display);
+  font-size:clamp(30px,7vw,64px);line-height:.95;letter-spacing:-.03em;
+  text-transform:uppercase;margin:0;
+}
+.boot-name small{display:block;font-size:.44em;color:var(--blue-lit);letter-spacing:.04em;margin-top:.5em}
+.boot-meter{
+  margin-top:clamp(28px,6vh,54px);
+  display:flex;align-items:baseline;gap:16px;
+  font-family:var(--mono);font-size:13px;color:var(--ink-2);
+  letter-spacing:.06em;text-transform:uppercase;
+}
+.boot-meter b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+.boot-bar{flex:1;height:2px;background:var(--line);position:relative;overflow:hidden}
+.boot-bar i{position:absolute;inset:0 auto 0 0;width:calc(var(--load,0) * 100%);background:var(--blue-lit);transition:width .3s linear}
+.boot-start{
+  margin-top:26px;
+  font-family:var(--display);text-transform:uppercase;letter-spacing:.06em;
+  font-size:15px;color:#fff;background:var(--blue);
+  border:0;padding:16px 34px;cursor:pointer;
+  transition:transform .18s var(--ease),background .18s var(--ease);
+}
+.boot-start:hover{background:#4b80e8}
+.boot-start:active{transform:translateY(1px)}
+.boot-start[hidden]{display:none}
+.boot-note{margin-top:14px;font-family:var(--mono);font-size:11.5px;color:var(--ink-3);letter-spacing:.04em}
+
+/* --------------------------------------------------------------- stage */
+#stage{
+  position:fixed;inset:0;z-index:var(--z-stage);
+  display:block;width:100%;height:100%;
+  touch-action:none;
+}
+body:not(.gl-on) #stage{display:none}
+
+/* When the 3D room is live the document layer stays in the DOM for
+   screen readers and for search, but stops painting behind the canvas. */
+body.gl-on .doc{
+  position:fixed;top:0;left:0;width:1px;height:1px;overflow:hidden;
+  clip-path:inset(50%);opacity:0;pointer-events:none;
+}
+body.gl-on .doc a:focus-visible,
+body.gl-on .doc button:focus-visible{position:relative}
+
+/* "Read as page" drops the room and hands over the written version. */
+body.reading .doc{position:static;width:auto;height:auto;overflow:visible;clip-path:none;opacity:1;pointer-events:auto}
+body.reading #stage{display:none}
+body.reading .hud{inset:auto;position:fixed;top:0;right:0;left:auto;bottom:auto;padding:0}
+body.reading .rail,body.reading .hint,body.reading .hud-mark{display:none}
+body.reading .hud-tools{position:fixed;top:calc(var(--gut) * .55);right:calc(var(--gut) * .55)}
+body.reading .panel{display:none}
+
+/* ----------------------------------------------------------------- hud */
+.hud{position:fixed;inset:0;z-index:var(--z-hud);pointer-events:none}
+body:not(.gl-on) .hud{display:none}
+.hud > *{pointer-events:auto}
+
+.hud-mark{
+  position:absolute;top:calc(var(--gut) * .55);left:calc(var(--gut) * .55);
+  background:rgba(8,10,14,.62);padding:9px 13px;border:1px solid var(--line);
+  backdrop-filter:blur(6px);
+  font-family:var(--display);text-transform:uppercase;letter-spacing:.02em;
+  font-size:13px;line-height:1.25;color:var(--ink);
+  text-decoration:none;
+}
+.hud-mark span{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink-3);font-weight:400}
+.hud-mark:hover{color:#fff}
+
+.hud-tools{
+  position:absolute;top:calc(var(--gut) * .55);right:calc(var(--gut) * .55);
+  display:flex;gap:8px;
+}
+.tool{
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-2);background:rgba(14,17,22,.72);
+  border:1px solid var(--line);padding:9px 12px;cursor:pointer;
+  backdrop-filter:blur(6px);
+  transition:color .15s var(--ease),border-color .15s var(--ease);
+}
+.tool:hover{color:var(--ink);border-color:var(--blue)}
+.tool[aria-pressed="true"]{color:var(--blue-lit);border-color:var(--blue)}
+
+/* Station rail: the keyboard route through the room. Always operable,
+   visible on focus so a keyboard user is never lost in a 3D scene. */
+.rail{
+  position:absolute;left:calc(var(--gut) * .55);bottom:calc(var(--gut) * .55);
+  display:flex;flex-direction:column;gap:2px;
+}
+.rail{background:linear-gradient(to right,rgba(8,10,14,.72),rgba(8,10,14,0));padding:10px 40px 10px 12px;margin-left:-12px}
+.rail button{
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);background:transparent;border:0;padding:6px 8px 6px 0;
+  cursor:pointer;text-align:left;
+  transition:color .15s var(--ease);
+}
+.rail button::before{
+  content:"";width:14px;height:1px;background:currentColor;flex:none;
+  transition:width .2s var(--ease);
+}
+.rail button:hover,.rail button:focus-visible{color:var(--ink)}
+.rail button:hover::before,.rail button:focus-visible::before{width:26px}
+.rail button[aria-current="true"]{color:var(--blue-lit)}
+.rail button[aria-current="true"]::before{width:26px;background:var(--blue-lit)}
+
+.hint{
+  position:absolute;right:calc(var(--gut) * .55);bottom:calc(var(--gut) * .55);
+  background:rgba(8,10,14,.6);padding:9px 13px;border:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);text-align:right;
+  transition:opacity .5s var(--ease);
+}
+.hint b{color:var(--ink-2);font-weight:400}
+body.deep .hint{opacity:0}
+
+/* --------------------------------------------------------------- panel */
+/* Real selectable HTML for whatever the camera is looking at. The 3D
+   screens carry the look; this carries the words. */
+.panel{
+  position:fixed;z-index:var(--z-panel);
+  right:0;top:0;height:100dvh;width:min(520px,100vw);
+  background:rgba(11,14,19,.93);
+  border-left:1px solid var(--line);
+  backdrop-filter:blur(14px);
+  overflow-y:auto;overscroll-behavior:contain;
+  padding:calc(var(--gut) * .75);
+  transform:translate3d(100%,0,0);
+  transition:transform .55s var(--ease);
+  -webkit-overflow-scrolling:touch;
+}
+@supports not (backdrop-filter:blur(4px)){.panel{background:#0b0e13}}
+.panel.open{transform:none}
+.panel:not(.open){pointer-events:none;visibility:hidden}
+.panel-close{
+  position:sticky;top:0;float:right;margin:-6px -6px 0 0;
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-2);background:transparent;border:1px solid var(--line);
+  padding:8px 11px;cursor:pointer;z-index:2;
+}
+.panel-close:hover{color:var(--ink);border-color:var(--blue)}
+.panel h2{
+  font-family:var(--display);text-transform:uppercase;
+  font-size:clamp(24px,4.2vw,34px);line-height:1.02;letter-spacing:-.02em;
+  margin:0 0 6px;padding-top:6px;
+}
+.panel .kicker{color:var(--blue-lit);font-size:15px;margin:0 0 20px}
+.panel .meta{
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.01em;
+  color:var(--ink-3);margin:0 0 18px;
+}
+.panel p{color:var(--ink-2);font-size:15px}
+.panel ul{margin:0 0 20px;padding:0;list-style:none;display:grid;gap:12px}
+.panel ul li{
+  color:var(--ink-2);font-size:14.5px;padding-left:18px;position:relative;
+}
+.panel ul li::before{content:"";position:absolute;left:0;top:.62em;width:8px;height:1px;background:var(--blue)}
+.panel img{border:1px solid var(--line);margin:0 0 20px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 22px;padding:0;list-style:none}
+.tags li{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-2);border:1px solid var(--line);padding:5px 9px;
+}
+.tags li::before{display:none}
+.btn{
+  display:inline-block;font-family:var(--display);text-transform:uppercase;
+  letter-spacing:.05em;font-size:13px;color:#fff;background:var(--blue);
+  padding:14px 24px;text-decoration:none;white-space:nowrap;
+  transition:background .18s var(--ease),transform .18s var(--ease);
+}
+.btn:hover{background:#4b80e8;color:#fff}
+.btn:active{transform:translateY(1px)}
+.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn-ghost:hover{background:transparent;border-color:var(--blue);color:#fff}
+.btn-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:26px}
+
+.spec{margin:0 0 26px;display:grid;gap:0}
+.spec div{
+  display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  padding:13px 0;border-bottom:1px solid var(--line-soft);
+}
+.spec div:last-child{border-bottom:0}
+.spec dt{
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);margin:0;flex:none;
+}
+.spec dd{margin:0;text-align:right;color:var(--ink)}
+.spec dd b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+.spec dd small{display:block;color:var(--ink-3);font-size:12.5px;font-family:var(--sans)}
+
+.panel-list{display:grid;gap:0;margin:0 0 24px;padding:0;list-style:none}
+.panel-list li{padding:0;position:static}
+.panel-list li::before{display:none}
+.panel-list button{
+  width:100%;text-align:left;background:transparent;border:0;
+  border-bottom:1px solid var(--line-soft);
+  padding:16px 0;cursor:pointer;color:var(--ink);
+  display:grid;gap:3px;
+  transition:padding-left .2s var(--ease);
+}
+.panel-list button:hover{padding-left:8px}
+.panel-list button b{font-family:var(--sans);font-weight:600;font-size:16px}
+.panel-list button span{
+  font-family:var(--mono);font-size:12px;letter-spacing:.01em;color:var(--ink-3);
+}
+
+/* ------------------------------------------------------- document layer */
+/* This is the whole site as plain HTML. It is what you get with no JS,
+   no WebGL, or a screen reader, and it is not a stripped-down version. */
+.doc{position:relative;z-index:var(--z-doc)}
+.wrap{width:min(1120px,100% - var(--gut) * 2);margin-inline:auto}
+.doc header.top{
+  border-bottom:1px solid var(--line);padding:22px 0;
+}
+.doc header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.brand{font-family:var(--display);text-transform:uppercase;font-size:15px;color:var(--ink);text-decoration:none;letter-spacing:.02em}
+.brand span{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink-3)}
+.doc nav ul{display:flex;gap:22px;margin:0;padding:0;list-style:none;flex-wrap:wrap}
+.doc nav a{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-2);text-decoration:none;
+}
+.doc nav a:hover,.doc nav a[aria-current="page"]{color:var(--blue-lit)}
+
+.doc-hero{padding:clamp(56px,11vh,110px) 0 clamp(40px,7vh,72px)}
+.doc-hero h1{
+  font-family:var(--display);text-transform:uppercase;
+  font-size:clamp(38px,8.5vw,92px);line-height:.94;letter-spacing:-.035em;
+  margin:0 0 22px;
+}
+.doc-hero h1 em{font-style:normal;color:var(--blue-lit);display:block}
+.doc-hero .lede{font-size:clamp(17px,2.1vw,20px);color:var(--ink-2);max-width:56ch;margin:0 0 30px}
+
+.doc section{padding:clamp(44px,7vh,80px) 0;border-top:1px solid var(--line)}
+.doc section > .wrap > h2{
+  font-family:var(--display);text-transform:uppercase;
+  font-size:clamp(24px,4vw,40px);line-height:1;letter-spacing:-.025em;margin:0 0 10px;
+}
+.doc section > .wrap > .sub{color:var(--ink-2);max-width:60ch;margin:0 0 34px}
+
+.grid-cards{display:grid;gap:1px;background:var(--line);border:1px solid var(--line)}
+@media(min-width:760px){.grid-cards{grid-template-columns:1fr 1fr}}
+.card{background:var(--void);padding:clamp(22px,3vw,32px);display:flex;flex-direction:column;gap:10px}
+.card h3{order:1}
+.card .eyebrow{order:2}
+.card p{order:3}
+.card ul{order:4}
+.card .go{order:5}
+.card--wide{grid-column:1/-1}
+.card--photo{padding:0}
+.card--photo img{width:100%;object-fit:cover;aspect-ratio:16/10}
+.card .eyebrow{
+  font-family:var(--mono);font-size:12px;letter-spacing:.01em;color:var(--ink-3);margin:-4px 0 0;
+}
+.card h3{font-size:21px;font-weight:600;letter-spacing:-.01em}
+.card p{color:var(--ink-2);font-size:15px;margin:0}
+.card ul{margin:4px 0 0;padding:0 0 0 18px;color:var(--ink-2);font-size:14.5px;display:grid;gap:8px}
+.card .go{margin-top:auto;padding-top:14px}
+.card .go a{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
+.card .go a::after{content:" \2192"}
+
+.stack{display:grid;gap:0;border-top:1px solid var(--line)}
+.stack article{padding:26px 0;border-bottom:1px solid var(--line-soft);display:grid;gap:8px}
+@media(min-width:760px){
+  .stack article{grid-template-columns:200px 1fr;gap:32px;align-items:start}
+}
+.stack .when{font-family:var(--mono);font-size:12.5px;letter-spacing:.01em;color:var(--ink-3)}
+.stack h3{font-size:19px;font-weight:600;margin:0 0 4px}
+.stack h3 a{color:var(--ink);text-decoration:none}
+.stack h3 a:hover{color:var(--blue-lit)}
+.stack p{color:var(--ink-2);font-size:15px;margin:0}
+
+.split{display:grid;gap:clamp(24px,4vw,54px);align-items:center}
+@media(min-width:860px){.split{grid-template-columns:1fr 1fr}}
+.split img{border:1px solid var(--line)}
+
+.doc footer{border-top:1px solid var(--line);padding:clamp(40px,6vh,66px) 0}
+.doc footer .wrap{display:grid;gap:34px}
+@media(min-width:760px){.doc footer .wrap{grid-template-columns:1.4fr 1fr 1fr}}
+.doc footer h3{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 14px;font-weight:400;
+}
+.doc footer ul{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.doc footer a{font-size:14.5px;text-decoration:none;color:var(--ink-2)}
+.doc footer a:hover{color:var(--blue-lit)}
+.mailto{font-family:var(--display);font-size:clamp(18px,2.6vw,26px);text-transform:lowercase;letter-spacing:-.01em;text-decoration:none;color:var(--ink);word-break:break-word}
+.mailto:hover{color:var(--blue-lit)}
+.colophon{
+  border-top:1px solid var(--line-soft);margin-top:34px;padding-top:22px;
+  font-size:12.5px;color:var(--ink-3);line-height:1.7;max-width:76ch;
+}
+.colophon a{color:var(--ink-2)}
+
+/* ------------------------------------------------------------- reduced */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;scroll-behavior:auto !important;
+  }
+}
+
+/* -------------------------------------------------------------- mobile */
+@media (max-width:760px){
+  .panel{width:100vw;height:82dvh;top:auto;bottom:0;border-left:0;border-top:1px solid var(--line);
+         transform:translate3d(0,100%,0)}
+  .panel.open{transform:none}
+  .rail{
+    left:0;right:0;bottom:0;flex-direction:row;gap:0;
+    background:rgba(9,11,15,.94);border-top:1px solid var(--line);
+    overflow-x:auto;scrollbar-width:none;
+  }
+  .rail::-webkit-scrollbar{display:none}
+  .rail button{padding:15px 14px;white-space:nowrap;font-size:10.5px}
+  .rail button::before{display:none}
+  .hint{bottom:64px;left:calc(var(--gut) * .55);right:auto;text-align:left}
+  .hud-tools{top:auto;bottom:64px;right:calc(var(--gut) * .55)}
+}

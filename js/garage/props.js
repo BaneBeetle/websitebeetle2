@@ -1,0 +1,648 @@
+/* Everything in the room that is not the car.
+   All of it is generated: boxes, cylinders, tori, tubes, plus canvas
+   textures for anything that carries words or a photograph. Each prop
+   maps to something real, and nothing is here purely as set dressing. */
+
+import * as THREE from 'three';
+import * as P from './paint.js';
+import * as S from './screens.js';
+import { ROOM, X0, X1, Z_BACK, blobShadow, bakeAO } from './scene.js';
+import { PROJECTS, EXPERIENCE, EDUCATION, PAPER, BIKE, PERSON } from './content.js';
+
+const MDF = () => new THREE.MeshStandardMaterial({ color: 0x6a5b47, roughness: 0.86, metalness: 0.02 });
+const STEEL = () => new THREE.MeshStandardMaterial({ color: 0x3d444e, roughness: 0.48, metalness: 0.82 });
+const DARK = () => new THREE.MeshStandardMaterial({ color: 0x1b1f26, roughness: 0.8, metalness: 0.25 });
+const ALU = () => new THREE.MeshStandardMaterial({ color: 0x98a1ac, roughness: 0.32, metalness: 0.92 });
+
+function photoPlane(url, w, h, fallback = 0x222933) {
+  const mat = new THREE.MeshStandardMaterial({ color: fallback, roughness: 0.9, metalness: 0.02 });
+  new THREE.TextureLoader().load(url, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    mat.map = t; mat.color.setHex(0xffffff); mat.needsUpdate = true;
+  });
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+}
+
+function framed(url, w, h, depth = 0.03) {
+  const g = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, h + 0.05, depth), DARK());
+  g.add(frame);
+  const img = photoPlane(url, w, h);
+  img.position.z = depth / 2 + 0.002;
+  g.add(img);
+  return g;
+}
+
+/* ------------------------------------------------------------ signage */
+
+export function buildSign(scene, touch) {
+  const g = new THREE.Group();
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 0.6, 0.05),
+    new THREE.MeshStandardMaterial({ map: touch ? S.touchSignTexture() : S.signTexture(), roughness: 0.7, metalness: 0.2 })
+  );
+  g.add(board);
+  for (const sx of [-1, 1]) {
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.42, 5), STEEL());
+    chain.position.set(sx * 1.02, 0.51, 0);
+    g.add(chain);
+  }
+  g.position.set(0.15, ROOM.h - 0.66, 3.05);
+  g.rotation.y = 0.02;
+  scene.add(g);
+  return g;
+}
+
+/* ---------------------------------------------------------- workbench */
+
+export function buildBench(scene) {
+  const g = new THREE.Group();
+  g.name = 'bench';
+  const wallX = X1;
+  const zc = -0.60, len = 3.7, depth = 0.62, topY = 0.92;
+  const hotspots = [];
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(depth, 0.06, len), MDF());
+  top.position.set(wallX - depth / 2, topY, zc);
+  g.add(top);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, len), STEEL());
+  lip.position.set(wallX - depth, topY - 0.05, zc);
+  g.add(lip);
+
+  // frame
+  for (const dz of [-len / 2 + 0.14, len / 2 - 0.14]) {
+    for (const dx of [0.09, depth - 0.09]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.055, topY - 0.03, 0.055), STEEL());
+      leg.position.set(wallX - dx, (topY - 0.03) / 2, zc + dz);
+      g.add(leg);
+    }
+  }
+  const shelf = new THREE.Mesh(new THREE.BoxGeometry(depth - 0.12, 0.04, len - 0.3), MDF());
+  shelf.position.set(wallX - depth / 2, 0.26, zc);
+  g.add(shelf);
+
+  // drawers under one end
+  const drawers = new THREE.Mesh(new THREE.BoxGeometry(depth - 0.06, topY - 0.08, 0.9), new THREE.MeshStandardMaterial({
+    color: 0x2d3742, roughness: 0.55, metalness: 0.5,
+  }));
+  drawers.position.set(wallX - depth / 2, (topY - 0.08) / 2, zc + 1.1);
+  g.add(drawers);
+  for (let i = 0; i < 3; i++) {
+    const pull = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.025, 0.5), ALU());
+    pull.position.set(wallX - depth - 0.005, 0.18 + i * 0.26, zc + 1.1);
+    g.add(pull);
+  }
+
+  /* pegboard above the bench, with tools that are actually hung */
+  const pegTex = pegboardTexture();
+  const peg = new THREE.Mesh(new THREE.PlaneGeometry(len, 1.15), new THREE.MeshStandardMaterial({
+    map: pegTex, roughness: 0.9,
+  }));
+  peg.position.set(wallX - 0.02, 1.72, zc);
+  peg.rotation.y = -Math.PI / 2;
+  g.add(peg);
+  for (let i = 0; i < 7; i++) {
+    const l = 0.20 + Math.random() * 0.16;
+    const wrench = new THREE.Mesh(new THREE.BoxGeometry(0.03, l, 0.014), ALU());
+    wrench.position.set(wallX - 0.06, 2.05 - l / 2, zc - 1.25 + i * 0.19);
+    g.add(wrench);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.008, 5, 10), ALU());
+    ring.position.set(wallX - 0.06, 2.05 - l, zc - 1.25 + i * 0.19);
+    ring.rotation.y = Math.PI / 2;
+    g.add(ring);
+  }
+
+  /* the monitor: the project index lives here */
+  const mon = new THREE.Group();
+  mon.position.set(wallX - 0.36, topY + 0.42, zc - 0.32);
+  mon.rotation.y = -Math.PI / 2 + 0.34;
+  g.add(mon);
+
+  const bezel = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.64, 0.035), new THREE.MeshStandardMaterial({
+    color: 0x14181e, roughness: 0.5, metalness: 0.4,
+  }));
+  mon.add(bezel);
+  const idle = S.screenIdle(0);
+  const index = S.screenIndex();
+  const screenMat = S.screenMaterial(idle, index);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.00, 0.585), screenMat);
+  screen.position.z = 0.019;
+  screen.name = 'monitor-screen';
+  mon.add(screen);
+  const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.42, 8), STEEL());
+  stand.position.set(0, -0.52, -0.02);
+  mon.add(stand);
+  const foot = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.02, 0.20), STEEL());
+  foot.position.set(0, -0.73, 0.02);
+  mon.add(foot);
+  hotspots.push({ id: 'bench', mesh: screen, size: [1.10, 0.66] });
+
+  /* Raspberry Pi on a breadboard: the Carbeetle classifier and the arm
+     controller both run on one of these */
+  const pi = new THREE.Group();
+  pi.position.set(wallX - 0.28, topY + 0.035, zc + 0.42);
+  g.add(pi);
+  const pcb = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.008, 0.19), new THREE.MeshStandardMaterial({
+    color: 0x1d5e3a, roughness: 0.6, metalness: 0.2,
+  }));
+  pi.add(pcb);
+  for (const [dx, dz, w, h, d, col] of [
+    [0.04, -0.05, 0.05, 0.014, 0.05, 0x2b3038],
+    [-0.045, 0.03, 0.03, 0.018, 0.055, 0x8b939d],
+    [0.03, 0.07, 0.045, 0.012, 0.03, 0x2b3038],
+  ]) {
+    const chip = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0.4 }));
+    chip.position.set(dx, 0.008 + h / 2, dz);
+    pi.add(chip);
+  }
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.005, 6, 6), new THREE.MeshBasicMaterial({ color: 0x8fffb0 }));
+  led.position.set(-0.05, 0.016, -0.08);
+  pi.add(led);
+
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.012, 0.16), new THREE.MeshStandardMaterial({
+    color: 0xd8d5cc, roughness: 0.8,
+  }));
+  board.position.set(wallX - 0.44, topY + 0.036, zc + 0.62);
+  g.add(board);
+  const jumpCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(wallX - 0.30, topY + 0.04, zc + 0.48),
+    new THREE.Vector3(wallX - 0.36, topY + 0.10, zc + 0.55),
+    new THREE.Vector3(wallX - 0.43, topY + 0.045, zc + 0.60),
+  ]);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(jumpCurve, 14, 0.004, 5, false),
+    new THREE.MeshStandardMaterial({ color: 0xd04a4a, roughness: 0.7 })));
+
+  /* a webcam on a small tripod aimed off the bench: the classifier's eye */
+  const camBody = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 10), DARK());
+  camBody.rotation.z = Math.PI / 2;
+  camBody.position.set(wallX - 0.52, topY + 0.13, zc - 1.15);
+  g.add(camBody);
+  const camLens = new THREE.Mesh(new THREE.CircleGeometry(0.018, 10), new THREE.MeshStandardMaterial({
+    color: 0x0c1016, roughness: 0.1, metalness: 0.8,
+  }));
+  camLens.position.set(wallX - 0.552, topY + 0.13, zc - 1.15);
+  camLens.rotation.y = -Math.PI / 2;
+  g.add(camLens);
+  const camPole = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.10, 6), STEEL());
+  camPole.position.set(wallX - 0.52, topY + 0.055, zc - 1.15);
+  g.add(camPole);
+
+  /* soldering iron, mug, and a coil of solder: a bench in use */
+  const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.036, 0.10, 14), new THREE.MeshStandardMaterial({
+    color: 0x21262e, roughness: 0.35, metalness: 0.05,
+  }));
+  mug.position.set(wallX - 0.20, topY + 0.08, zc - 0.95);
+  g.add(mug);
+  const iron = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.006, 0.22, 8), new THREE.MeshStandardMaterial({
+    color: 0x2e3540, roughness: 0.5, metalness: 0.5,
+  }));
+  iron.rotation.z = Math.PI / 2; iron.rotation.y = 0.5;
+  iron.position.set(wallX - 0.30, topY + 0.045, zc + 1.0);
+  g.add(iron);
+  const coil = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 6, 16), ALU());
+  coil.rotation.x = Math.PI / 2;
+  coil.position.set(wallX - 0.44, topY + 0.05, zc + 0.98);
+  g.add(coil);
+
+  /* a photo of the real car, propped against the pegboard */
+  const shot = framed('img/photo/carbeetle-800.jpg', 0.36, 0.24);
+  shot.position.set(wallX - 0.10, topY + 0.16, zc + 1.28);
+  shot.rotation.y = -Math.PI / 2 + 0.18;
+  shot.rotation.x = -0.10;
+  g.add(shot);
+
+  const sh = blobShadow(1.1, len + 0.6, 0.5);
+  sh.position.set(wallX - 0.34, 0.008, zc);
+  g.add(sh);
+
+  scene.add(g);
+  return { group: g, hotspots, screenMat, screen, idle, index, mon };
+}
+
+function pegboardTexture() {
+  const { c, x, w, h } = P.canvas(1024, 384);
+  x.fillStyle = '#2c333d'; x.fillRect(0, 0, w, h);
+  for (let iy = 0; iy < 24; iy++) {
+    for (let ix = 0; ix < 64; ix++) {
+      x.fillStyle = 'rgba(0,0,0,0.55)';
+      x.beginPath(); x.arc(10 + ix * 16, 10 + iy * 16, 3.2, 0, 6.284); x.fill();
+      x.fillStyle = 'rgba(255,255,255,0.05)';
+      x.beginPath(); x.arc(10 + ix * 16, 8.4 + iy * 16, 3.2, 3.4, 6.0); x.fill();
+    }
+  }
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, 'rgba(255,255,255,0.07)');
+  g.addColorStop(1, 'rgba(0,0,0,0.45)');
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  return P.toTexture(c);
+}
+
+/* --------------------------------------------------------- study wall */
+
+export function buildWall(scene) {
+  const g = new THREE.Group();
+  g.name = 'wall';
+  const wx = X0 + 0.03, zc = -0.6;
+  const hotspots = [];
+
+  // a plywood backing board, so the wall reads as a working wall
+  const backer = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.95, 3.8), new THREE.MeshStandardMaterial({
+    color: 0x4c4335, roughness: 0.92,
+  }));
+  backer.position.set(wx, 1.62, zc);
+  g.add(backer);
+
+  const face = (mesh, y, z, ry = 0, rz = 0) => {
+    mesh.position.set(wx + 0.026, y, z);
+    mesh.rotation.y = Math.PI / 2;
+    mesh.rotation.z = rz;
+    g.add(mesh);
+    return mesh;
+  };
+
+  /* the publication, the biggest thing on the wall */
+  const paper = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.83), new THREE.MeshStandardMaterial({
+    map: S.paperTexture(), roughness: 0.95,
+  }));
+  face(paper, 1.86, zc - 1.05, 0, 0.015);
+  paper.name = 'paper';
+  hotspots.push({ id: 'paper', mesh: paper, size: [0.70, 0.90] });
+
+  /* the AERA photo, pinned beside it */
+  const aera = framed(PAPER.photo, 0.66, 0.44);
+  aera.position.set(wx + 0.04, 2.02, zc + 0.05);
+  aera.rotation.y = Math.PI / 2;
+  aera.rotation.z = -0.02;
+  g.add(aera);
+
+  /* lecture photo and the classroom work */
+  const lect = framed('img/photo/brian-lectern-600.jpg', 0.5, 0.36);
+  lect.position.set(wx + 0.04, 1.46, zc + 0.12);
+  lect.rotation.y = Math.PI / 2;
+  lect.rotation.z = 0.03;
+  g.add(lect);
+
+  const ec4 = framed('img/photo/ec4all-600.jpg', 0.42, 0.30);
+  ec4.position.set(wx + 0.04, 1.44, zc + 0.72);
+  ec4.rotation.y = Math.PI / 2;
+  ec4.rotation.z = -0.04;
+  g.add(ec4);
+
+  /* two school cards */
+  const cols = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.33), new THREE.MeshStandardMaterial({
+    map: S.noteTexture('Columbia', [EDUCATION[0].degree, EDUCATION[0].when, EDUCATION[0].note]), roughness: 0.95,
+  }));
+  face(cols, 2.06, zc + 1.06, 0, 0.02);
+  const uci = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.31), new THREE.MeshStandardMaterial({
+    map: S.noteTexture('UC Irvine', [EDUCATION[1].degree, EDUCATION[1].when, EDUCATION[1].where]), roughness: 0.95,
+  }));
+  face(uci, 1.68, zc + 1.42, 0, -0.03);
+
+  /* the thermal plot, taped up like a working printout */
+  const plot = framed('img/photo/thermal-plot-600.jpg', 0.46, 0.31);
+  plot.position.set(wx + 0.04, 1.06, zc - 0.30);
+  plot.rotation.y = Math.PI / 2;
+  plot.rotation.z = 0.02;
+  g.add(plot);
+
+  /* a strip of experience index cards running along the bottom */
+  let z = zc - 1.28;
+  for (const e of EXPERIENCE) {
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24), new THREE.MeshStandardMaterial({
+      map: S.noteTexture(e.org.split(',')[0], [e.role, e.when], '#3b6fd4'), roughness: 0.95,
+    }));
+    face(card, 0.86, z, 0, (Math.random() - 0.5) * 0.06);
+    z += 0.60;
+  }
+
+  /* a strip light clipped over the board */
+  const clip = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.07, 1.7), new THREE.MeshStandardMaterial({
+    color: 0x2a313b, roughness: 0.6, metalness: 0.4,
+  }));
+  clip.position.set(wx + 0.16, 2.52, zc);
+  g.add(clip);
+  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 1.62), new THREE.MeshBasicMaterial({ color: 0xdfe9ff }));
+  tube.position.set(wx + 0.16, 2.47, zc);
+  g.add(tube);
+  const wash = new THREE.PointLight(0xcfe0ff, 1.5, 3.4, 2);
+  wash.position.set(wx + 0.55, 2.2, zc);
+  g.add(wash);
+
+  hotspots.push({ id: 'wall', mesh: backer, size: null });
+
+  scene.add(g);
+  return { group: g, hotspots };
+}
+
+/* ------------------------------------------------------------ the dog */
+
+/* Iron Bark, parked on its dock. Sit pose, one behavior: the head turns
+   to whatever the pointer is over. No walk cycle, no pathfinding. */
+export function buildDog(scene) {
+  const g = new THREE.Group();
+  g.name = 'dog';
+  g.position.set(-2.30, 0, -4.40);
+  g.rotation.y = 0.62;
+  scene.add(g);
+
+  const shell = new THREE.MeshStandardMaterial({ color: 0x2b323c, roughness: 0.42, metalness: 0.62 });
+  const joint = new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.7, metalness: 0.4 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x3b6fd4, roughness: 0.3, metalness: 0.5 });
+
+  /* dock */
+  const dock = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.05, 0.56), new THREE.MeshStandardMaterial({
+    color: 0x1d222a, roughness: 0.6, metalness: 0.4,
+  }));
+  dock.position.y = 0.025;
+  g.add(dock);
+  const dockLed = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.012, 0.012), new THREE.MeshBasicMaterial({ color: 0x7aa7ff }));
+  dockLed.position.set(0, 0.052, 0.26);
+  g.add(dockLed);
+
+  /* body, sitting: haunches down, front legs straight */
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.52), shell);
+  body.position.set(0, 0.36, 0.02);
+  body.rotation.x = -0.24;
+  g.add(body);
+  const spine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.44), joint);
+  spine.position.set(0, 0.47, 0.02);
+  spine.rotation.x = -0.24;
+  g.add(spine);
+  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.012, 0.10), trim);
+  vent.position.set(0, 0.474, -0.10);
+  vent.rotation.x = -0.24;
+  g.add(vent);
+
+  const legPair = (z, upperLen, upperRot, lowerLen, lowerRot, hipY) => {
+    for (const sx of [-1, 1]) {
+      const hip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10), joint);
+      hip.rotation.z = Math.PI / 2;
+      hip.position.set(sx * 0.145, hipY, z);
+      g.add(hip);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.05, upperLen, 0.07), shell);
+      upper.position.set(sx * 0.145, hipY - Math.cos(upperRot) * upperLen / 2, z + Math.sin(upperRot) * upperLen / 2);
+      upper.rotation.x = -upperRot;
+      g.add(upper);
+      const kneeY = hipY - Math.cos(upperRot) * upperLen;
+      const kneeZ = z + Math.sin(upperRot) * upperLen;
+      const lower = new THREE.Mesh(new THREE.BoxGeometry(0.036, lowerLen, 0.05), shell);
+      lower.position.set(sx * 0.145, kneeY - Math.cos(lowerRot) * lowerLen / 2, kneeZ + Math.sin(lowerRot) * lowerLen / 2);
+      lower.rotation.x = -lowerRot;
+      g.add(lower);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), joint);
+      foot.position.set(sx * 0.145, kneeY - Math.cos(lowerRot) * lowerLen, kneeZ + Math.sin(lowerRot) * lowerLen);
+      g.add(foot);
+    }
+  };
+  legPair(0.20, 0.24, 0.10, 0.16, -0.06, 0.40);    // front, propped up
+  legPair(-0.18, 0.17, 1.15, 0.17, -0.95, 0.30);   // rear, folded under
+
+  /* head on a short neck: this is the part that moves */
+  const head = new THREE.Group();
+  head.position.set(0, 0.50, 0.26);
+  g.add(head);
+  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.15, 0.20), shell);
+  head.add(skull);
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.09), joint);
+  snout.position.set(0, -0.025, 0.13);
+  head.add(snout);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x8fc0ff });
+  const eyes = [];
+  for (const sx of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.CircleGeometry(0.021, 12), eyeMat);
+    e.position.set(sx * 0.045, 0.03, 0.101);
+    head.add(e);
+    eyes.push(e);
+  }
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.10, 6), joint);
+  antenna.position.set(0.06, 0.12, -0.04);
+  head.add(antenna);
+
+  const sh = blobShadow(0.8, 0.7, 0.55);
+  sh.position.y = 0.004;
+  g.add(sh);
+
+  return {
+    group: g, head, eyeMat, dockLed,
+    hotspots: [{ id: 'dog', mesh: body, size: [0.6, 0.7] }],
+  };
+}
+
+/* ----------------------------------------------------------- the bike */
+
+export function buildBike(scene) {
+  const g = new THREE.Group();
+  g.name = 'bike';
+  g.position.set(1.68, 1.82, Z_BACK + 0.34);
+  scene.add(g);
+
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x384049, roughness: 0.35, metalness: 0.7 });
+  const tyre = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.94 });
+  const rim = new THREE.MeshStandardMaterial({ color: 0x8d96a2, roughness: 0.3, metalness: 0.9 });
+
+  const wheel = (x) => {
+    const w = new THREE.Group();
+    w.position.x = x;
+    const t = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.045, 8, 26), tyre);
+    w.add(t);
+    const r = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.014, 6, 24), rim);
+    w.add(r);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.07, 8), rim);
+    hub.rotation.x = Math.PI / 2;
+    w.add(hub);
+    for (let i = 0; i < 8; i++) {
+      const s = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.60, 4), rim);
+      s.rotation.z = (i / 8) * Math.PI;
+      w.add(s);
+    }
+    g.add(w);
+    return w;
+  };
+  const front = wheel(0.60), rear = wheel(-0.60);
+
+  const bar = (a, b, r = 0.019) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+    const len = A.distanceTo(B);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 7), frameMat);
+    m.position.copy(A).add(B).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+    g.add(m); return m;
+  };
+  bar([-0.60, 0, 0], [-0.10, 0.26, 0]);      // chainstay to seat cluster
+  bar([-0.10, 0.26, 0], [0.26, 0.30, 0]);    // top tube
+  bar([0.26, 0.30, 0], [0.60, 0, 0], 0.021); // down to the fork crown
+  bar([-0.10, 0.26, 0], [-0.05, -0.10, 0]);  // seat tube
+  bar([-0.05, -0.10, 0], [-0.60, 0, 0]);     // chainstay
+  bar([-0.05, -0.10, 0], [0.60, 0, 0], 0.017);
+  bar([0.26, 0.30, 0], [0.20, 0.44, 0], 0.016);
+  const barTop = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.52, 7), frameMat);
+  barTop.rotation.x = Math.PI / 2;
+  barTop.position.set(0.20, 0.45, 0);
+  g.add(barTop);
+  const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.05, 0.10), new THREE.MeshStandardMaterial({
+    color: 0x16191e, roughness: 0.6,
+  }));
+  saddle.position.set(-0.13, 0.36, 0);
+  saddle.rotation.z = -0.12;
+  g.add(saddle);
+  const crank = new THREE.Mesh(new THREE.TorusGeometry(0.10, 0.010, 5, 16), rim);
+  crank.position.set(-0.05, -0.10, 0.03);
+  g.add(crank);
+
+  /* the hooks it hangs from */
+  for (const hx of [-0.60, 0.60]) {
+    const hook = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.011, 5, 12, Math.PI * 1.4), new THREE.MeshStandardMaterial({
+      color: 0x2f363f, roughness: 0.5, metalness: 0.7,
+    }));
+    hook.position.set(hx, 0.40, -0.09);
+    hook.rotation.set(Math.PI / 2, 0, 0);
+    g.add(hook);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.22), STEEL());
+    arm.position.set(hx, 0.44, -0.20);
+    g.add(arm);
+  }
+
+  /* the real photo, pinned next to it */
+  const shot = framed(BIKE.photo, 0.34, 0.50);
+  shot.position.set(0.06, -0.30, -0.28);
+  g.add(shot);
+
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.4), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.set(0, 0.1, 0);
+  g.add(hit);
+
+  return { group: g, front, rear, hotspots: [{ id: 'bike', mesh: hit, size: null }] };
+}
+
+/* ------------------------------------------------------------ the exit */
+
+export function buildExit(scene) {
+  const g = new THREE.Group();
+  g.name = 'exit';
+  const z = Z_BACK + 0.05, x = 2.52;
+  scene.add(g);
+
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.14, 0.09), new THREE.MeshStandardMaterial({
+    color: 0x232932, roughness: 0.7, metalness: 0.3,
+  }));
+  frame.position.set(x, 1.07, z);
+  g.add(frame);
+  const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.86, 2.0, 0.05), new THREE.MeshStandardMaterial({
+    color: 0x2c333d, roughness: 0.55, metalness: 0.45,
+  }));
+  leaf.position.set(x, 1.0, z + 0.06);
+  g.add(leaf);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.20, 8), ALU());
+  handle.rotation.x = Math.PI / 2;
+  handle.position.set(x + 0.32, 1.02, z + 0.10);
+  g.add(handle);
+
+  /* the sign over the door */
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 0.30), new THREE.MeshBasicMaterial({
+    map: S.exitSignTexture(),
+  }));
+  sign.position.set(x, 2.32, z + 0.07);
+  g.add(sign);
+  const signGlow = new THREE.PointLight(0x8fb4ff, 0.9, 2.0, 2);
+  signGlow.position.set(x, 2.2, z + 0.4);
+  g.add(signGlow);
+
+  /* the light switch: the one control that changes the room */
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.20, 0.02), new THREE.MeshStandardMaterial({
+    color: 0x333a44, roughness: 0.6,
+  }));
+  plate.position.set(x - 0.72, 1.22, z + 0.06);
+  g.add(plate);
+  const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.11, 0.022), new THREE.MeshStandardMaterial({
+    color: 0xc4ccd6, roughness: 0.5,
+  }));
+  rocker.position.set(x - 0.72, 1.22, z + 0.075);
+  g.add(rocker);
+
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.3, 0.3), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.set(x, 1.15, z + 0.15);
+  g.add(hit);
+  const switchHit = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.2), new THREE.MeshBasicMaterial({ visible: false }));
+  switchHit.position.set(x - 0.72, 1.22, z + 0.12);
+  g.add(switchHit);
+
+  return {
+    group: g, rocker,
+    hotspots: [{ id: 'exit', mesh: hit, size: null }, { id: 'lights', mesh: switchHit, size: null }],
+  };
+}
+
+/* --------------------------------------------------------- odds and ends */
+
+/* Things that keep the room from being still, and reward orbiting to the
+   back of the shop where there is no content to find. */
+export function buildDressing(scene) {
+  const g = new THREE.Group();
+  scene.add(g);
+
+  /* a shop fan on a stand, turning */
+  const fan = new THREE.Group();
+  fan.position.set(-2.95, 1.05, 1.55);
+  fan.rotation.y = -0.8;
+  g.add(fan);
+  const cage = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.014, 6, 20), STEEL());
+  fan.add(cage);
+  const blades = new THREE.Group();
+  fan.add(blades);
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, 0.008), new THREE.MeshStandardMaterial({
+      color: 0x4d545e, roughness: 0.5, metalness: 0.6,
+    }));
+    b.position.set(Math.cos(i * 1.571) * 0.09, Math.sin(i * 1.571) * 0.09, 0);
+    b.rotation.z = i * 1.571 + 0.5;
+    blades.add(b);
+  }
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.0, 8), STEEL());
+  pole.position.set(-2.95, 0.53, 1.55);
+  g.add(pole);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.22, 0.03, 14), STEEL());
+  base.position.set(-2.95, 0.015, 1.55);
+  g.add(base);
+
+  /* a stack of tyres in the corner */
+  for (let i = 0; i < 3; i++) {
+    const t = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.11, 8, 20), new THREE.MeshStandardMaterial({
+      color: 0x15181d, roughness: 0.95,
+    }));
+    t.rotation.x = Math.PI / 2;
+    t.position.set(-3.05, 0.12 + i * 0.20, -2.3);
+    t.rotation.z = i * 0.5;
+    g.add(t);
+  }
+
+  /* a jack and a creeper under the bench end */
+  const jack = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.52), new THREE.MeshStandardMaterial({
+    color: 0x9a2f2f, roughness: 0.55, metalness: 0.4,
+  }));
+  jack.position.set(2.62, 0.07, -3.0);
+  jack.rotation.y = 0.3;
+  g.add(jack);
+
+  /* a coolant jug and a funnel: the small true details */
+  const jug = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.24, 12), new THREE.MeshStandardMaterial({
+    color: 0x2e5fa8, roughness: 0.4, metalness: 0.05,
+  }));
+  jug.position.set(3.2, 1.06, -2.4);
+  g.add(jug);
+
+  /* the roller door motor, mounted on the ceiling: the project itself */
+  const motor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.46), new THREE.MeshStandardMaterial({
+    color: 0x3a424c, roughness: 0.5, metalness: 0.6,
+  }));
+  motor.position.set(0, ROOM.h - 0.22, 2.45);
+  g.add(motor);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 1.5), STEEL());
+  rail.position.set(0, ROOM.h - 0.20, 3.25);
+  g.add(rail);
+  const motorLed = new THREE.Mesh(new THREE.CircleGeometry(0.018, 10), new THREE.MeshBasicMaterial({ color: 0x8fffb0 }));
+  motorLed.position.set(0.14, ROOM.h - 0.22, 2.68);
+  motorLed.rotation.y = 0.0;
+  g.add(motorLed);
+
+  return { group: g, blades, motorLed };
+}
