@@ -137,6 +137,23 @@ async function start() {
   const exit = Props.buildExit(scene);
   const dressing = Props.buildDressing(scene);
   Props.buildSign(scene, coarse);
+
+  /* ------------------------------------------------- ambient machines */
+  /* A pup on patrol and an arm on the bench. Neither is clickable and
+     neither is in `targets`, so a ray fired at a hotspot goes straight
+     through both of them no matter where they have got to. */
+  const pup = Props.buildPup(scene);
+  const arm = Props.buildArm(scene);
+  const drone = Props.buildDrone(scene);
+  const pupPos = new THREE.Vector3();
+  const pupAhead = new THREE.Vector3();
+  const pupHeadW = new THREE.Vector3();
+  const pupCamW = new THREE.Vector3();
+  const gripW = new THREE.Vector3();
+  let pupYaw = 0, pupLook = 0, pupWag = 0, pupGreet = 0, pupNear = 0;
+  const dronePos = new THREE.Vector3();
+  const droneAhead = new THREE.Vector3();
+  let droneYaw = null, droneBank = 0, dronePitch = 0;
   setProgress(0.92);
 
   /* ---------------------------------------------------------- picking */
@@ -818,6 +835,202 @@ async function start() {
       const n = Math.floor(filmT * dog.film.fps) % dog.film.count;
       if (n !== filmN) { filmN = n; dog.film.show(n); }
     }
+
+    /* ---------------------------------------------- ambient machines */
+    /* Held still on a weak machine and parked outright when the visitor
+       has asked for less motion, in which case both sit in the pose they
+       hold at t=0 rather than snapping to a second one. */
+    if (tier >= 2 && !reduced) {
+      const P = pup.sample(clock.t);
+      const u = (P.s / pup.len) % 1;
+      pup.curve.getPointAt(u, pupPos);
+      pup.curve.getPointAt((P.s + 0.12) / pup.len % 1, pupAhead);
+      pup.group.position.set(pupPos.x, 0, pupPos.z);
+
+      /* He faces the way the ring is going. Reading the heading off a
+         point a little further along rather than off the tangent means
+         the turn is already rounded by the curve itself. */
+      const want = Math.atan2(pupAhead.x - pupPos.x, pupAhead.z - pupPos.z);
+      let d = want - pupYaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      pupYaw += d * (1 - Math.pow(0.0009, dt));
+      pup.group.rotation.y = pupYaw;
+
+      /* Gait phase is distance travelled, not time, so the feet cannot
+         outrun the floor however hard he is accelerating. */
+      const gait = (P.s / pup.stride) * Math.PI * 2;
+      const moving = Math.min(1, P.speed / pup.speed);
+      const SWING = pup.swing * moving;
+      for (let i = 0; i < pup.legs.length; i++) {
+        const ph = gait + (i === 0 || i === 3 ? 0 : Math.PI);
+        pup.legs[i].rotation.x = -Math.sin(ph) * SWING;
+        // the knee only folds on the half of the cycle that swings
+        // forward, which is what keeps the planted foot off the floor
+        pup.shins[i].rotation.x = Math.max(0, Math.cos(ph)) * 0.34 * moving;
+      }
+      /* the body lifts by what the pendulum takes off the standing leg,
+         so the planted foot holds its height instead of sinking */
+      const bob = (0.302 * (1 - Math.cos(SWING))) * 0.5;
+      /* Both idle terms only ever add height. A breath or a roll that can
+         also subtract puts the standing foot a couple of millimetres into
+         the concrete at the bottom of its cycle, and the roll is the
+         larger of the two because it acts at the width of the stance. */
+      pup.rig.position.y = bob * (1 - Math.cos(gait * 2)) * 0.5
+        + (1 + Math.sin(clock.t * 1.9)) * 0.003;
+      pup.rig.rotation.z = Math.sin(gait) * 0.022 * moving;
+
+      /* Standing about, he looks around, and looks at you instead if you
+         are close enough for it to land. */
+      pup.head.getWorldPosition(pupHeadW);
+      camera.getWorldPosition(pupCamW);
+      /* eased rather than a threshold, or the ears would snap the moment
+         the camera crossed a line on the floor */
+      const nearNow = THREE.MathUtils.clamp(1 - (pupCamW.distanceTo(pupHeadW) - 1.6) / 1.8, 0, 1);
+      pupNear += (nearNow - pupNear) * (1 - Math.pow(0.08, dt));
+      let lookY = 0;
+      if (P.hold > 0.12 && P.hold < 0.92) {
+        if (pupNear > 0.5) {
+          const bearing = Math.atan2(pupCamW.x - pupHeadW.x, pupCamW.z - pupHeadW.z);
+          let rel = bearing - pupYaw;
+          while (rel > Math.PI) rel -= Math.PI * 2;
+          while (rel < -Math.PI) rel += Math.PI * 2;
+          lookY = THREE.MathUtils.clamp(rel, -0.85, 0.85);
+        } else if (P.look) {
+          lookY = Math.sin(P.hold * Math.PI * 2) * 0.62;
+        }
+      }
+      pupLook += (lookY - pupLook) * (1 - Math.pow(0.02, dt));
+      pup.head.rotation.y = pupLook;
+      pup.head.rotation.x = -Math.abs(pupLook) * 0.10 + Math.sin(clock.t * 1.9 + 1) * 0.010;
+
+      /* The hello at the dock: tail up and going, and two small hops in
+         the middle of the stop. Nothing that would put him on the dock. */
+      /* The wag is integrated rather than read off clock.t directly. A
+         rate that is multiplied by the clock jumps its whole phase the
+         instant the rate changes, which after a few minutes of uptime is
+         a tail that teleports. Accumulating it keeps it continuous. */
+      pupGreet += (P.greet - pupGreet) * (1 - Math.pow(0.05, dt));
+      pupWag += dt * (3.2 + pupGreet * 9);
+      const wagK = 0.10 + pupGreet * 0.32 + moving * 0.10;
+      pup.tail.rotation.y = Math.sin(pupWag) * wagK;
+      pup.tail.rotation.x = -0.45 - pupGreet * 0.26;
+      pup.tail2.rotation.y = Math.sin(pupWag - 0.7) * (wagK + 0.04);
+      let hop = 0;
+      if (P.greet && P.hold > 0.30 && P.hold < 0.66) {
+        hop = Math.abs(Math.sin((P.hold - 0.30) / 0.36 * Math.PI * 2));
+      }
+      pup.rig.position.y += hop * 0.125;
+      for (let i = 0; i < pup.ears.length; i++) {
+        pup.ears[i].rotation.x = 0.30 - (pupGreet * 0.30 + pupNear * 0.18);
+      }
+      pup.shadow.scale.setScalar(1 - hop * 0.10);
+
+      /* eyes: the same slow blink Iron Bark has, lifted a little at
+         night so he does not simply vanish, but never lit like a lamp */
+      const blink = Math.sin(clock.t * 0.9 + 2.1) > 0.985 ? 0.18 : 1;
+      const eyeK = blink * (nightMode ? 1.22 : 1);
+      pup.eyeMat.color.setRGB(
+        Math.min(1, 0.56 * eyeK), Math.min(1, 0.75 * eyeK), Math.min(1, 1 * eyeK));
+
+      /* ---- the arm ------------------------------------------------- */
+      const at = clock.t % arm.period;
+      let st = arm.steps[arm.steps.length - 1];
+      for (let i = 0; i < arm.steps.length; i++) {
+        if (at >= arm.steps[i].t0 && at < arm.steps[i].t1) { st = arm.steps[i]; break; }
+      }
+      const k = st.dur > 0 ? (at - st.t0) / st.dur : 1;
+      const e = k * k * (3 - 2 * k);          // smoothstep, the same curve the bay plates use
+      const mix = (a, b) => a + (b - a) * e;
+      arm.yaw.rotation.y = mix(st.a.yaw, st.b.yaw);
+      arm.shoulder.rotation.x = mix(st.a.sh, st.b.sh);
+      arm.elbow.rotation.x = mix(st.a.el, st.b.el);
+      arm.wrist.rotation.x = mix(st.a.wr, st.b.wr);
+      arm.roll.rotation.y = mix(st.a.rl, st.b.rl);
+      const open = mix(st.a.grip, st.b.grip);
+      arm.fingers[0].position.x = -(0.023 + open * 0.011);
+      arm.fingers[1].position.x = 0.023 + open * 0.011;
+
+      /* The part rides the gripper by copying its transform outright,
+         so there is no frame where the two disagree. The arm root only
+         carries a translation, so the world orientation of the gripper
+         is already the part's local one. */
+      if (st.held) {
+        arm.grip.getWorldPosition(gripW);
+        arm.group.worldToLocal(gripW);
+        arm.part.position.copy(gripW);
+        arm.grip.getWorldQuaternion(arm.part.quaternion);
+      } else {
+        arm.part.position.copy(st.spot === 'b' ? arm.spotB : arm.spotA);
+        arm.part.quaternion.identity();
+      }
+      /* the status light is green while it works and amber on the rests,
+         which is the only thing on either machine that changes colour */
+      const busy = st.rest ? 0 : 1;
+      /* clamped per channel: letting the lift push green past 1 while red
+         and blue still climb turns the dot white instead of brighter */
+      const lm = nightMode ? 1.15 : 1;
+      arm.led.material.color.setRGB(
+        Math.min(1, (busy ? 0.56 : 1) * lm),
+        Math.min(1, (busy ? 1 : 0.72) * lm),
+        Math.min(1, (busy ? 0.69 : 0.32) * lm));
+
+      /* ---- the drone ----------------------------------------------- */
+      /* Offset a third of a lap so it is never in the same corner of the
+         room as the pup on the first pass, and the two rings drift apart
+         from there because their periods do not divide. */
+      const D = drone.sample(clock.t + drone.period * 0.34);
+      drone.curve.getPointAt((D.s / drone.len) % 1, dronePos);
+      drone.curve.getPointAt((D.s + 0.10) / drone.len % 1, droneAhead);
+
+      /* Station keeping. A quadcopter never holds a perfectly still
+         point, and the two frequencies are deliberately not multiples so
+         the wobble does not settle into an obvious loop. */
+      const sway = Math.sin(clock.t * 1.13) * 0.018 + Math.sin(clock.t * 0.47 + 1.4) * 0.026;
+      drone.group.position.set(dronePos.x, dronePos.y + sway, dronePos.z);
+
+      const dWant = Math.atan2(droneAhead.x - dronePos.x, droneAhead.z - dronePos.z);
+      if (droneYaw === null) droneYaw = dWant;      // no whip round on the first frame
+      let dd = dWant - droneYaw;
+      while (dd > Math.PI) dd -= Math.PI * 2;
+      while (dd < -Math.PI) dd += Math.PI * 2;
+      const dk = 1 - Math.pow(0.004, dt);
+      const turned = dd * dk;                  // the yaw actually applied this frame
+      droneYaw += turned;
+      drone.group.rotation.y = droneYaw;
+
+      /* It banks into the turn and noses down to accelerate, the way the
+         real thing has to: a multirotor can only go where it leans. Both
+         are read off how hard it is turning and how fast it is going,
+         not animated by hand. Rate comes from the rotation applied, not
+         from the error still outstanding: the error is about eleven
+         times the per frame turn at this smoothing, so using it pinned
+         the bank to its own limit through every corner. */
+      const dMove = Math.min(1, D.speed / drone.speed);
+      const yawRate = turned / Math.max(dt, 1e-4);
+      const bankWant = THREE.MathUtils.clamp(-yawRate * 0.32, -0.40, 0.40);
+      droneBank += (bankWant - droneBank) * Math.min(1, dt * 3.2);
+      dronePitch += (dMove * 0.14 - dronePitch) * Math.min(1, dt * 2.4);
+      drone.tilt.rotation.z = droneBank;
+      drone.tilt.rotation.x = dronePitch + Math.sin(clock.t * 1.9) * 0.012;
+
+      /* The shadow stays on the concrete and only tracks it in plan, and
+         thins out the higher it climbs. */
+      drone.shadow.position.set(dronePos.x, 0.005, dronePos.z);
+      const alt = THREE.MathUtils.clamp(dronePos.y / drone.cruiseY, 0.4, 1.4);
+      drone.shadow.scale.setScalar(0.86 + alt * 0.22);
+      drone.shadow.material.opacity = 0.34 - alt * 0.10;
+      /* discs fade up with throttle, so a hover reads slower than a dash */
+      drone.discMat.opacity = 0.15 + dMove * 0.09;
+      drone.led.material.color.setRGB(
+        Math.min(1, 0.56 * (nightMode ? 1.2 : 1)),
+        Math.min(1, 0.75 * (nightMode ? 1.2 : 1)),
+        Math.min(1, 1 * (nightMode ? 1.2 : 1)));
+    }
+    pup.group.visible = tier >= 1;
+    arm.group.visible = tier >= 1;
+    drone.group.visible = tier >= 1;
+    drone.shadow.visible = tier >= 1;
 
     rig.update(dt, now);
     renderer.render(scene, camera);
