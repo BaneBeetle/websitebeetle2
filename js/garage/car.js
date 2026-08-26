@@ -81,60 +81,222 @@ export async function loadCar(scene, onProgress) {
   /* ---- angel eyes -------------------------------------------------- */
   /* The corona rings are the whole face of an E46 and the model ships
      without them. Nothing here is guessed: headlight_led breaks into
-     exactly four connected pieces, one per round lamp, and each ring takes
-     that piece's own centre and radius. They sit 6mm proud of the reflector
-     and stay behind the lens cover, which is where the real ones live. The
-     model's nose is not centred on x=0, so the two sides carry their own
-     measured offsets rather than a mirrored pair. */
-  const angelMat = new THREE.MeshBasicMaterial({ color: 0xdce9ff, toneMapped: false });
+     connected rims, one pair per round lamp, and each ring is fitted to the
+     annulus those rims describe. That annulus is an ellipse, not a circle —
+     0.0726 across by 0.0671 tall on the outer lamps — and the earlier
+     circular torus split the difference, which is why its upper arc stood
+     proud of the housing and pierced the fender skin at some angles. rz is
+     held under the surround's own ceiling (0.7496 outer, 0.7517 inner) so
+     the top of the ring cannot escape the lamp. The model's nose is not
+     centred on x=0, so the two sides carry their own measured offsets
+     rather than a mirrored pair. */
+  const angelMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
   const angelHalos = [];
   const angel = new THREE.Group();
   angel.name = 'angel-eyes';
-  const haloMap = P.glowTexture('#bcd6ff');
+  const haloMap = P.haloTexture();
   for (const L of [
-    { at: [-0.6512, -2.1635, 0.6793], r: 0.0716 },   // outer, swept back into the fender
-    { at: [0.6040, -2.1635, 0.6793], r: 0.0716 },
-    { at: [-0.4795, -2.2495, 0.6855], r: 0.0653 },   // inner, further forward
-    { at: [0.4323, -2.2495, 0.6855], r: 0.0653 },
+    // outer, swept back into the fender
+    { at: [-0.6512, -2.1635, 0.6801], rx: 0.0700, rz: 0.0640, glow: 0.052 },
+    { at: [0.6040, -2.1635, 0.6801], rx: 0.0700, rz: 0.0640, glow: 0.052 },
+    // inner, further forward
+    { at: [-0.4795, -2.2495, 0.6855], rx: 0.0630, rz: 0.0610, glow: 0.017 },
+    { at: [0.4323, -2.2495, 0.6855], rx: 0.0630, rz: 0.0610, glow: 0.017 },
   ]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(L.r, 0.0058, 8, 44), angelMat);
+    /* A fat tube reads as a chalky donut: at 0.0058 the cross-section shaded
+       light-to-dark across its own width and the 44 segments showed as a
+       polygon. Thin it until the core is a line and let the corona carry the
+       neon. The torus is round and the lamp is not, so the ellipse comes
+       from scale. */
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.0032 / L.rx, 14, 128), angelMat);
     ring.position.set(L.at[0], L.at[1] - 0.006, L.at[2]);
+    ring.scale.set(L.rx, L.rz, L.rx);
     ring.rotation.x = Math.PI / 2;                   // torus axis down the nose
     angel.add(ring);
-    // the corona it throws onto the reflector dish behind it
+    /* There is no bloom pass on this scene, so the corona is the bloom. One
+       sprite, at exactly twice the ring radius: the texture puts its bright
+       line at half its own radius, so at 2x it lands on the ring and spills
+       a full ring-radius either side. A second, wider sprite was tried for
+       the far spill and had to go — at 3.6x it was a 25cm disc that washed
+       the hood and the fender in white. It sits forward of the projector;
+       at the ring's own depth the outer lamp's lens ball masked the middle
+       of the sprite and left a hollow annulus. */
     const halo = new THREE.Mesh(
-      new THREE.PlaneGeometry(L.r * 3.2, L.r * 3.2),
-      new THREE.MeshBasicMaterial({ map: haloMap, transparent: true, opacity: 0.42,
+      // a circle, not a square: the corners of the old plane were what
+      // punched through the surround, not the sprite itself
+      new THREE.CircleGeometry(L.rx * 2.0, 48),
+      new THREE.MeshBasicMaterial({ map: haloMap, transparent: true, opacity: 0.52,
         depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
     );
-    halo.position.set(L.at[0], L.at[1] - 0.009, L.at[2]);
+    halo.position.set(L.at[0], L.at[1] - L.glow, L.at[2]);
+    halo.scale.set(1, L.rz / L.rx, 1);
     halo.rotation.x = Math.PI / 2;
+    halo.renderOrder = 4;
+    halo.material.userData.base = 0.52;
     angel.add(halo);
     angelHalos.push(halo.material);
   }
   body.parent.add(angel);
 
-  /* The lens cover was being driven emissive along with the bulbs, which lit
-     the whole front of the lamp like a slab of plastic. It is glass: let it
-     take the room instead of making its own light. */
+  /* ---- the lens cover ---------------------------------------------- */
+  /* The cover was being driven emissive along with the bulbs, which lit the
+     whole front of the lamp like a slab of plastic. It is glass. But nearly
+     clear at 0.15 it stopped being anything at all: the lamp read as a unit
+     with its cover off, internals in open air. Glass earns its presence
+     through reflection, and alpha cannot do that on its own — raising
+     opacity only veils what is behind it, which is the frosting failure.
+     So the pane is split in two: a thin dark body for depth, and an
+     additive metal skin over it carrying the environment. Additive never
+     veils, so the sheen composites over the halos instead of dimming them,
+     and the strip lights sweep across the whole face as you walk round. */
   const hlGlass = pick('headlight_glass');
   if (hlGlass) {
     const g = hlGlass.material;
-    /* Nearly clear, and doing its work with reflections rather than body:
-       at 0.26 the pane read as a grey veil over the lamps, which is frosting,
-       not glass. */
-    g.color.setHex(0xc6d6e8);
-    g.transparent = true; g.opacity = 0.15; g.depthWrite = false;
-    g.roughness = 0.04; g.metalness = 0.0; g.envMapIntensity = 4.2;
+    g.color.setHex(0x0d141d);
+    g.transparent = true; g.opacity = 0.17; g.depthWrite = false;
+    g.roughness = 0.02; g.metalness = 0.0; g.envMapIntensity = 4.6;
+    g.clearcoat = 1.0; g.clearcoatRoughness = 0.03;
+    g.side = THREE.FrontSide;      // a double-sided pane tints twice
     if (g.emissive) g.emissive.setRGB(0, 0, 0);
+    hlGlass.renderOrder = 12;
+
+    const sheen = hlGlass.clone();
+    sheen.name = 'headlight-sheen';
+    const sm = g.clone();
+    sm.color.setHex(0x5d6b7e);     // how much of the room the pane hands back
+    sm.metalness = 1.0; sm.roughness = 0.075; sm.envMapIntensity = 1.35;
+    sm.opacity = 1; sm.transparent = true; sm.blending = THREE.AdditiveBlending;
+    sm.depthWrite = false; sm.clearcoat = 0;
+    sheen.material = sm;
+    sheen.renderOrder = 13;
+    hlGlass.parent.add(sheen);
   }
 
-  /* CARBEETLE plate. The car has a name, so it gets its name. */
+  /* ---- turn signals ------------------------------------------------ */
+  /* The corner section was the most obviously disassembled thing on the car:
+     headlight_chrome's facets were left mirror-raw and read as crumpled
+     foil, with the two bulb cones behind them standing out black against it,
+     and blinker_glass — which ships its own ribbed normal map — was so close
+     to clear at 0.25 that there was no lens over any of it. Give the lens
+     back its body and the facets go quiet behind it. */
+  const blinker = all('blinker_glass');
+  for (const b of blinker) {
+    const m = b.material;
+    m.color.setHex(0xe0dcd6);      // frosted clear, a shade warm
+    m.transparent = true; m.opacity = 0.60; m.depthWrite = false;
+    m.roughness = 0.30; m.metalness = 0.0; m.envMapIntensity = 1.9;
+    m.clearcoat = 1.0; m.clearcoatRoughness = 0.18;
+    m.side = THREE.FrontSide;
+    if (m.normalScale) m.normalScale.set(1.7, 1.7);   // let the ribs read
+    b.renderOrder = 11;
+  }
+  /* headlight_chrome is only ever lamp internals — the two reflector bowls,
+     the blinker facets and the side-marker facets — so softening it here
+     costs no trim anywhere else on the car. Satin rather than mirror: it
+     still catches a bright rim where it curves toward you, but it stops
+     handing back a sharp picture of the ceiling strips. */
+  for (const c of all('headlight_chrome')) {
+    const m = c.material;
+    m.color.setHex(0x646c7a);
+    m.metalness = 0.88; m.roughness = 0.60; m.envMapIntensity = 0.68;
+  }
+  /* The two bulb cones behind each signal lens. They are their own six-vertex
+     pieces of headlight_chrome, sitting on the face of the faceted dish and
+     pointing at the viewer, and no lens treatment hides them — muted they
+     stopped being black hardware and started being a brown lump. Nothing on
+     the real car pokes out here, so they go. The predicate is narrow enough
+     to leave the side-marker pieces (|x| 0.925) and the dish itself alone. */
+  for (const c of all('headlight_chrome')) {
+    dropParts(c.geometry, (n, size, mid) => !(
+      n <= 6 && size.every((d) => d < 0.09) &&
+      Math.abs(mid[0]) > 0.70 && Math.abs(mid[0]) < 0.83));
+  }
+  /* A bulb deep behind the lens, which is all you ever see of one in
+     daylight. Warm, small, and always on — an unlit signal on a parked car
+     still catches a little of the room. It sits at the outboard end of the
+     lens, where the amber section of the real one is, and forward of where
+     the cones were or the dish masks it, the trap the coronas fell into. */
+  const blinkGlow = P.glowTexture('#ffd9a0', '255,196,120', '255,170,90');
+  for (const at of [[-0.8180, -2.1960, 0.6700], [0.7740, -2.1960, 0.6700]]) {
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.038, 24),
+      new THREE.MeshBasicMaterial({ map: blinkGlow, transparent: true, opacity: 0.46,
+        depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
+    );
+    dot.position.set(at[0], at[1], at[2]);
+    dot.rotation.x = Math.PI / 2;
+    dot.renderOrder = 5;
+    angel.add(dot);
+  }
+
+  /* ---- lamp interior ----------------------------------------------- */
+  /* The projector ships with baseColorFactor [0,0,0,1], which rendered it as
+     a flat black ball filling the middle of the outer lamp. The real one is
+     a clear glass dome you look straight through to the reflector behind it,
+     holding a hard specular and a bright rim. The same material is also the
+     small stub in the inner lamp, which was reading as a dark speck for
+     exactly the same reason and clears up with it. */
+  for (const l of all('headlight_lens')) {
+    const m = l.material;
+    m.color.setHex(0xcddbec);
+    m.transparent = true; m.opacity = 0.17; m.depthWrite = false;
+    m.metalness = 0.0; m.roughness = 0.045; m.envMapIntensity = 3.4;
+    m.clearcoat = 1.0; m.clearcoatRoughness = 0.03;
+    m.side = THREE.FrontSide;
+    l.renderOrder = 8;               // behind the cover, in front of the bowl
+  }
+  for (const h of all('headlight_plastic')) {
+    const m = h.material;
+    m.roughness = Math.max(0.45, m.roughness ?? 0.33);   // housing, not trim
+    m.envMapIntensity = 0.55;
+  }
+
+  /* CARBEETLE plate. The car has a name, so it gets its name.
+     The model hangs a full-width slab across the nose, 0.548 by 0.134, which
+     is four times as long as it is tall and covers the whole bumper mouth.
+     The real car runs a short tow-hook bracket plate tucked to one side, so
+     the front plate is squeezed to a plate-shaped 2:1 and slid outboard.
+     Material.029 carries the rear plate in the same geometry, so only the
+     vertices ahead of the axle move; the nose sits at -y. */
   const plate = pick('Material.029');
   if (plate) {
-    const t = plateTexture();
-    plate.material = new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, metalness: 0.1 });
+    /* Both plates share one mesh and one material, so reshaping the front one
+       alone means splitting them: the rear keeps the full-width recess it was
+       modelled for, and stretching a short plate's texture across it left the
+       name two ends wide. Each gets a mesh, and a texture cut to its own
+       proportion. */
+    const front = new THREE.Mesh(plate.geometry.clone(), new THREE.MeshStandardMaterial({
+      map: plateTexture(2), roughness: 0.55, metalness: 0.1,
+    }));
+    front.name = 'front-plate';
+    front.frustumCulled = false;
+    keepPlate(front.geometry, 'front');
+    shiftFrontPlate(front.geometry, { cx: -0.0243, scale: 0.489, dx: -0.352, dz: -0.048 });
+    plate.parent.add(front);
+
+    keepPlate(plate.geometry, 'rear');
+    plate.material = new THREE.MeshStandardMaterial({
+      map: plateTexture(4), roughness: 0.55, metalness: 0.1,
+    });
   }
+
+  /* Moving the plate off-centre exposed what it had been hiding: the bumper
+     carries a raised mounting pad, a shallow box the exact size of the old
+     plate, standing 27mm proud of the skin. No M3 bumper has one, and with
+     the plate gone it read as a blue rectangle stuck to the nose.
+     It is two pieces, and neither is bumper skin: a 54-vertex box, and the
+     flat 14-vertex panel it stands on, which bridges the air intake behind
+     it. Both go, and the intake becomes the single opening the real bumper
+     has. Two gentler fixes were tried first and both left a mark. Collapsing
+     the box onto the panel put the two coplanar, which z-fought into a
+     speckled lip along the top of the intake; cutting only the box left the
+     panel reading as a bright flat strip bridging the same place. Nothing
+     shows through once they are gone — the intake was already open behind
+     them. Runs before the hood carve so the cut survives the re-index. */
+  dropParts(body.geometry, (n, size, mid) => !(
+    n <= 60 && size[0] > 0.40 && size[0] < 0.70 && size[1] < 0.050 &&
+    size[2] > 0.05 && size[2] < 0.15 &&
+    mid[1] < -2.42 && Math.abs(mid[0]) < 0.10));
 
   /* ---- carve the hood --------------------------------------------- */
   const floorN = new THREE.Vector3(0, -HOOD.slope, 1).normalize();
@@ -250,6 +412,75 @@ export async function loadCar(scene, onProgress) {
       bay.group.visible = t > 0.02;
     },
   };
+}
+
+/* Delete whole connected pieces of a mesh without touching the rest of it.
+   Only the index buffer is rewritten; the orphaned vertices cost nothing and
+   rebuilding the attributes for four cones would cost more than they save. */
+function dropParts(geo, keep) {
+  const idx = geo.index, pos = geo.attributes.position;
+  const par = new Int32Array(pos.count);
+  for (let i = 0; i < par.length; i++) par[i] = i;
+  const find = (a) => { while (par[a] !== a) a = par[a] = par[par[a]]; return a; };
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = find(idx.getX(t));
+    for (let k = 1; k < 3; k++) { const b = find(idx.getX(t + k)); if (a !== b) par[b] = a; }
+  }
+  const box = new Map();                      // root -> running bounds
+  for (let t = 0; t < idx.count; t += 3) {
+    const r = find(idx.getX(t));
+    let b = box.get(r);
+    if (!b) box.set(r, b = { n: new Set(), lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] });
+    for (let k = 0; k < 3; k++) {
+      const v = idx.getX(t + k);
+      b.n.add(v);
+      const p = [pos.getX(v), pos.getY(v), pos.getZ(v)];
+      for (let d = 0; d < 3; d++) { if (p[d] < b.lo[d]) b.lo[d] = p[d]; if (p[d] > b.hi[d]) b.hi[d] = p[d]; }
+    }
+  }
+  const cut = new Set();
+  for (const [r, b] of box) {
+    const size = [0, 1, 2].map((d) => b.hi[d] - b.lo[d]);
+    const mid = [0, 1, 2].map((d) => (b.hi[d] + b.lo[d]) / 2);
+    if (!keep(b.n.size, size, mid)) cut.add(r);
+  }
+  if (!cut.size) return 0;
+  const out = [];
+  for (let t = 0; t < idx.count; t += 3) {
+    if (cut.has(find(idx.getX(t)))) continue;
+    out.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+  }
+  geo.setIndex(out);
+  return cut.size;
+}
+
+/* Drop every triangle belonging to the other plate. The nose sits at -y, so
+   the sign of a triangle's first vertex is enough to tell the two apart. */
+function keepPlate(geo, which) {
+  const idx = geo.index, pos = geo.attributes.position;
+  const want = which === 'front';
+  const out = [];
+  for (let t = 0; t < idx.count; t += 3) {
+    if ((pos.getY(idx.getX(t)) < 0) !== want) continue;
+    out.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+  }
+  geo.setIndex(out);
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+}
+
+/* Squeeze and slide the front number plate. Everything at negative y is the
+   front; the rear plate is a separate mesh by the time this runs. */
+function shiftFrontPlate(geo, { cx, scale, dx, dz }) {
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) > 0) continue;                 // rear plate, leave it be
+    pos.setX(i, (pos.getX(i) - cx) * scale + cx + dx);
+    pos.setZ(i, pos.getZ(i) + dz);
+  }
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 function flipGeometry(geo) {
@@ -807,14 +1038,20 @@ function buildBay() {
 
 /* ------------------------------------------------------------ decals */
 
-function plateTexture() {
-  const { c, x, w, h } = P.canvas(1024, 256);
+/* Drawn to the proportion of the plate it is going on: 4:1 for the rear
+   recess, 2:1 for the short bracket plate up front. Nine letters on the
+   short one have to sit tight, so the tracking closes up with it. */
+function plateTexture(aspect = 4) {
+  const { c, x, w, h } = P.canvas(256 * aspect, 256);
   x.fillStyle = '#e8e9e4'; x.fillRect(0, 0, w, h);
-  x.strokeStyle = '#1a1c20'; x.lineWidth = 10;
-  x.strokeRect(14, 14, w - 28, h - 28);
+  x.strokeStyle = '#1a1c20'; x.lineWidth = aspect > 3 ? 10 : 8;
+  const inset = aspect > 3 ? 14 : 11;
+  x.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
   P.line(x, 'CARBEETLE', {
-    font: P.fonts.display, size: 132, color: '#16181d',
-    x: w / 2, y: h / 2 + 46, align: 'center', track: 6,
+    font: P.fonts.display,
+    size: aspect > 3 ? 132 : 74, color: '#16181d',
+    x: w / 2, y: h / 2 + (aspect > 3 ? 46 : 26),
+    align: 'center', track: aspect > 3 ? 6 : 1,
   });
   // grime, so it does not look freshly printed
   for (let i = 0; i < 260; i++) {

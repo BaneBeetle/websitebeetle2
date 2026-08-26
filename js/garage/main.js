@@ -624,10 +624,18 @@ async function start() {
     }
     /* Angel eyes hold a low glow whether the lamps are on or not, the way
        sidelights do, and come all the way up with the switch. Without that
-       floor the car has no face at all until you find the light pull. */
-    const ae = 0.44 + lampT * 0.56;
-    car.lights.angel.ring.color.setRGB(ae * 0.86, ae * 0.92, ae);
-    for (const h of car.lights.angel.halos) h.opacity = 0.16 + lampT * 0.34;
+       floor the car has no face at all until you find the light pull. Both
+       states are white: the blue weighting here was what made them read as
+       ice rather than the neon in the photographs. */
+    const ae = 0.46 + lampT * 0.54;
+    car.lights.angel.ring.color.setRGB(ae, ae, ae);
+    /* The corona is this car's only bloom, so it swings further than the
+       core does — a ring that merely brightens looks painted on, one whose
+       spill grows looks lit. It scales off the opacity it was built with
+       rather than a literal, so retuning the sprite retunes both states. */
+    for (const h of car.lights.angel.halos) {
+      h.opacity = (h.userData.base ?? 0.4) * (0.34 + lampT * 0.66);
+    }
 
     // night mode: the acceptable version of "the room changes"
     const nk = 1 - Math.pow(0.004, dt);

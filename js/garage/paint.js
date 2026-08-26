@@ -270,12 +270,43 @@ export function blobTexture(soft = 0.55) {
   return toTexture(c, { srgb: false });
 }
 
-export function glowTexture(color = '#cfe0ff') {
+/* The corona of a lit ring, which is not the same shape as the glow of a
+   lamp: a disc gradient is brightest in the middle, and the middle of an
+   angel eye is the projector, which is dark. This peaks on the ring line at
+   half the sprite's radius and falls away both inward and outward, so the
+   light lands on the bowl and the glass rather than filling the hole. The
+   tail carries a whisper of violet — the dusk photographs have it. */
+export function haloTexture() {
+  const { c, x, w, h } = canvas(256, 256);
+  const g = x.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2);
+  for (const [t, a, rgb] of [
+    [0.00, 0.06, '255,255,255'],
+    [0.20, 0.10, '255,255,255'],
+    [0.32, 0.22, '255,255,255'],
+    [0.42, 0.48, '255,255,255'],
+    [0.47, 0.80, '255,255,255'],
+    [0.50, 1.00, '255,255,255'],   // the ring sits here
+    [0.53, 0.80, '255,253,255'],
+    [0.58, 0.55, '253,248,255'],
+    [0.66, 0.32, '250,243,255'],
+    [0.76, 0.17, '245,236,255'],
+    [0.88, 0.06, '239,230,255'],
+    [1.00, 0.00, '234,226,255'],
+  ]) g.addColorStop(t, `rgba(${rgb},${a})`);
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  return toTexture(c);
+}
+
+/* The falloff carries as much as the colour does: `mid` is where the glow
+   still has body and `edge` is the long tail it dies into. The defaults are
+   the cool cast the strip lights and the bench glow were built on; the
+   signal bulb passes a warm amber through instead. */
+export function glowTexture(color = '#cfe0ff', mid = '150,180,240', edge = '120,150,220') {
   const { c, x, w, h } = canvas(128, 128);
   const g = x.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2);
   g.addColorStop(0, color);
-  g.addColorStop(0.25, 'rgba(150,180,240,0.45)');
-  g.addColorStop(1, 'rgba(120,150,220,0)');
+  g.addColorStop(0.25, `rgba(${mid},0.45)`);
+  g.addColorStop(1, `rgba(${edge},0)`);
   x.fillStyle = g; x.fillRect(0, 0, w, h);
   return toTexture(c);
 }
