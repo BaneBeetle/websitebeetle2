@@ -809,3 +809,568 @@ export function buildDressing(scene) {
 
   return { group: g, blades, motorLed };
 }
+
+/* ------------------------------------------------- ambient machines */
+/* Two small robots that keep the shop moving. Both are built from the
+   same parts bin as Iron Bark so they read as one product line, and both
+   run entirely off the shared clock: position, pose and gait are pure
+   functions of t, so stepping time backwards reproduces a frame exactly.
+   Neither carries a hotspot. They are life, not navigation. */
+
+const PUP_SHELL = () => new THREE.MeshStandardMaterial({ color: 0x2f3742, roughness: 0.38, metalness: 0.55 });
+const PUP_JOINT = () => new THREE.MeshStandardMaterial({ color: 0x13171c, roughness: 0.66, metalness: 0.42 });
+const PUP_TRIM = () => new THREE.MeshStandardMaterial({ color: 0x3b6fd4, roughness: 0.28, metalness: 0.5 });
+
+/* Both wanderers walk a closed Catmull-Rom ring on the same clock, so
+   the timeline maths lives here once. A route is a list of stops, each
+   with a dwell in seconds; the ring is sampled to arc length and every
+   leg gets a cosine speed ramp off a standing start and back down into
+   the next stop, running flat out in between. Easing position instead
+   would leave a machine arriving at a pass-through waypoint at twice
+   cruise and then snapping back to it, which on the pup is the exact
+   mismatch that reads as a moonwalk once the legs are driven off
+   distance. Ramping speed keeps it continuous, so there is no join.
+
+   sample(t) is a pure function of t. Nothing accumulates, so stepping
+   the clock backwards reproduces a frame exactly. */
+function ringPath(points, speed, ramp = 0.55) {
+  const curve = new THREE.CatmullRomCurve3(points.map((w) => new THREE.Vector3(...w.at)),
+                                           true, 'catmullrom', 0.5);
+  /* Finer than the default 200, so the arc length table the walk is
+     driven from and the one getPointAt looks up are the same table. */
+  curve.arcLengthDivisions = 600;
+  const len = curve.getLength();
+  const lens = curve.getLengths(600);
+  const stopS = points.map((w, i) => {
+    const f = (i / points.length) * 600, lo = Math.floor(f);
+    return lens[lo] + (lens[Math.min(600, lo + 1)] - lens[lo]) * (f - lo);
+  });
+
+  const beats = [];
+  let at = 0;
+  for (let i = 0; i < points.length; i++) {
+    const w = points[i], nx = points[(i + 1) % points.length];
+    if (w.dwell > 0) {
+      beats.push({ t0: at, t1: at + w.dwell, hold: 1, s0: stopS[i], wp: i });
+      at += w.dwell;
+    }
+    const s0 = stopS[i];
+    const s1 = i === points.length - 1 ? len : stopS[i + 1];
+    const ti = w.dwell > 0 ? ramp : 0;          // leaving a stop
+    const to = nx.dwell > 0 ? ramp : 0;         // arriving at one
+    const dur = (s1 - s0) / speed + (ti + to) / 2;
+    beats.push({ t0: at, t1: at + dur, hold: 0, s0, s1, wp: i, ti, to, tc: dur - ti - to });
+    at += dur;
+  }
+  const period = at;
+
+  const sample = (t) => {
+    const u = ((t % period) + period) % period;
+    let b = beats[beats.length - 1];
+    for (let i = 0; i < beats.length; i++) {
+      if (u >= beats[i].t0 && u < beats[i].t1) { b = beats[i]; break; }
+    }
+    if (b.hold) {
+      return { s: b.s0, speed: 0, hold: (u - b.t0) / (b.t1 - b.t0), stop: points[b.wp] };
+    }
+    const V = speed;
+    let tau = u - b.t0, s = b.s0, sp = V;
+    if (tau < b.ti) {
+      s += (V / 2) * (tau - (b.ti / Math.PI) * Math.sin((Math.PI * tau) / b.ti));
+      sp = (V / 2) * (1 - Math.cos((Math.PI * tau) / b.ti));
+    } else if (tau < b.ti + b.tc) {
+      s += (V * b.ti) / 2 + V * (tau - b.ti);
+    } else {
+      const sg = tau - b.ti - b.tc;
+      s += (V * b.ti) / 2 + V * b.tc
+         + (V / 2) * (sg + (b.to / Math.PI) * Math.sin((Math.PI * sg) / b.to));
+      sp = (V / 2) * (1 + Math.cos((Math.PI * sg) / b.to));
+    }
+    return { s, speed: sp, hold: 0, stop: points[b.wp] };
+  };
+
+  return { curve, len, period, sample };
+}
+
+/* The pup patrols this ring, walked as a closed Catmull-Rom so the
+   corners round themselves off instead of needing any turn logic.
+   Which side of the car it runs down is not an arbitrary choice. The car
+   sits in the middle of the floor and both wide stations look at it from
+   the door end, so the whole left hand lane is behind it: a pup patrolling
+   there is out of sight for four fifths of a lap. This ring keeps the near
+   lane and the apron in front of the car, where it is in clear view, and
+   lets the far lane be the stretch where it goes behind the car and comes
+   back out. Waypoint 6 parks it beside Iron Bark's dock for a hello,
+   clear of the dock itself and off the line the dog station looks down. */
+const PUP_ROUTE = [
+  { at: [0.70, 2.95], dwell: 2.6, look: 1 },    // the apron, in front of the nose
+  { at: [1.95, 1.85], dwell: 0, look: 0 },
+  { at: [2.10, 0.10], dwell: 3.0, look: 1 },    // near lane, between car and bench
+  { at: [2.05, -1.90], dwell: 0, look: 0 },
+  { at: [1.45, -3.35], dwell: 0, look: 0 },
+  { at: [-0.30, -4.35], dwell: 0, look: 0 },    // along the back wall
+  { at: [-1.36, -4.24], dwell: 4.2, look: 0, greet: 1 },
+  { at: [-2.25, -3.05], dwell: 0, look: 0 },
+  { at: [-2.35, -1.00], dwell: 2.2, look: 1 },  // far lane, behind the car
+  { at: [-2.05, 1.40], dwell: 0, look: 0 },
+  { at: [-1.75, 2.70], dwell: 0, look: 0 },     // round the nose and back to the apron
+];
+const PUP_SPEED = 0.52;      // metres per second at cruise
+const PUP_SCALE = 0.42;      // against Iron Bark, who is the full size dog
+
+export function buildPup(scene) {
+  const g = new THREE.Group();
+  g.name = 'pup';
+  scene.add(g);
+
+  /* The animal is built at Iron Bark's own dimensions and then shrunk,
+     which is the cheapest way to guarantee the silhouettes match. */
+  const craft = new THREE.Group();
+  craft.scale.setScalar(PUP_SCALE);
+  /* Iron Bark's feet hang where they do because he stands on a dock.
+     Borrowing his skeleton wholesale therefore leaves the pup hovering
+     about 30 mm over bare concrete, so the whole animal is dropped by
+     exactly the gap between his lowest foot and his own origin. Derived
+     rather than dialled in, so it survives anyone editing the leg. */
+  const FOOT_GAP = (0.40 - 0.163 - 0.139) - 0.040 * 0.72;
+  craft.position.y = -FOOT_GAP * PUP_SCALE;
+  g.add(craft);
+  const rig = new THREE.Group();
+  craft.add(rig);
+
+  const shell = PUP_SHELL(), joint = PUP_JOINT(), trim = PUP_TRIM();
+  const rbox = (w, h, d, r, mat) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 1, r), mat);
+
+  const body = rbox(0.27, 0.20, 0.46, 0.055, shell);
+  body.position.set(0, 0.42, 0);
+  rig.add(body);
+  /* The spine plate is not decoration. Dropping it as a simplification
+     left daylight between the back of the skull and the top of the body
+     on every side on view, because it is the piece that bridges them. */
+  const spine = rbox(0.17, 0.055, 0.40, 0.022, joint);
+  spine.position.set(0, 0.525, 0.02);
+  rig.add(spine);
+  const vent = rbox(0.20, 0.012, 0.10, 0.005, trim);
+  vent.position.set(0, 0.528, -0.11);
+  rig.add(vent);
+
+  /* Four pendulum legs with a knee, because the knee is what lets a foot
+     lift clear on the swing instead of scuffing through the floor. */
+  const legs = [], shins = [];
+  const legGeo = new RoundedBoxGeometry(0.058, 0.15, 0.070, 1, 0.024);
+  const lowGeo = new RoundedBoxGeometry(0.046, 0.13, 0.052, 1, 0.020);
+  const footGeo = new THREE.SphereGeometry(0.040, 8, 6);
+  const legPair = (z, hipY) => {
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Group();
+      leg.position.set(sx * 0.135, hipY, z);
+      rig.add(leg);
+      const upper = new THREE.Mesh(legGeo, shell);
+      upper.position.set(0, -0.085, 0.006);
+      leg.add(upper);
+      const shin = new THREE.Group();
+      shin.position.set(0, -0.163, 0.006);
+      leg.add(shin);
+      const lower = new THREE.Mesh(lowGeo, shell);
+      lower.position.set(0, -0.072, -0.004);
+      shin.add(lower);
+      const foot = new THREE.Mesh(footGeo, joint);
+      foot.position.set(0, -0.139, 0.002);
+      foot.scale.set(1, 0.72, 1.15);
+      shin.add(foot);
+      legs.push(leg); shins.push(shin);
+    }
+  };
+  legPair(0.175, 0.40);
+  legPair(-0.165, 0.395);
+  const shoulderGeo = new THREE.SphereGeometry(0.058, 8, 6);
+  const haunchGeo = new THREE.SphereGeometry(0.066, 8, 6);
+  for (const sx of [-1, 1]) {
+    const shoulder = new THREE.Mesh(shoulderGeo, shell);
+    shoulder.position.set(sx * 0.132, 0.425, 0.175);
+    shoulder.scale.set(0.9, 1, 1.15);
+    rig.add(shoulder);
+    const haunch = new THREE.Mesh(haunchGeo, shell);
+    haunch.position.set(sx * 0.132, 0.415, -0.170);
+    haunch.scale.set(0.9, 1, 1.2);
+    rig.add(haunch);
+  }
+
+  /* Head, oversized on purpose, same as his. No antenna and no separate
+     nose: at this size those parts are one pixel and only cost draws. */
+  const head = new THREE.Group();
+  head.position.set(0, 0.545, 0.245);
+  rig.add(head);
+  const skull = rbox(0.195, 0.155, 0.195, 0.058, shell);
+  head.add(skull);
+  const muzzle = rbox(0.115, 0.075, 0.085, 0.030, joint);
+  muzzle.position.set(0, -0.045, 0.115);
+  head.add(muzzle);
+  const face = rbox(0.155, 0.078, 0.018, 0.026, new THREE.MeshStandardMaterial({
+    color: 0x0c0f14, roughness: 0.16, metalness: 0.55,
+  }));
+  face.position.set(0, 0.022, 0.094);
+  head.add(face);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x8fc0ff });
+  const eyeGeo = new THREE.CircleGeometry(0.030, 10);
+  for (const sx of [-1, 1]) {
+    const e = new THREE.Mesh(eyeGeo, eyeMat);
+    e.position.set(sx * 0.042, 0.022, 0.104);
+    head.add(e);
+  }
+  const ears = [];
+  const earGeo = new RoundedBoxGeometry(0.042, 0.085, 0.028, 1, 0.013);
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Group();
+    ear.position.set(sx * 0.068, 0.072, -0.020);
+    head.add(ear);
+    const shellEar = new THREE.Mesh(earGeo, shell);
+    shellEar.position.y = 0.042;
+    ear.add(shellEar);
+    ear.rotation.x = 0.30;
+    ear.rotation.z = sx * 0.12;
+    ears.push(ear);
+  }
+
+  const tail = new THREE.Group();
+  tail.position.set(0, 0.475, -0.225);
+  rig.add(tail);
+  const tail1 = rbox(0.040, 0.040, 0.115, 0.017, shell);
+  tail1.position.set(0, 0.020, -0.058);
+  tail.add(tail1);
+  const tail2 = new THREE.Group();
+  tail2.position.set(0, 0.038, -0.112);
+  tail.add(tail2);
+  const tail2m = rbox(0.032, 0.032, 0.095, 0.014, shell);
+  tail2m.position.set(0, 0.014, -0.048);
+  tail2.add(tail2m);
+  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.021, 6, 5), trim);
+  tailTip.position.set(0, 0.026, -0.095);
+  tail2.add(tailTip);
+  tail.rotation.x = -0.45;
+
+  const sh = blobShadow(0.46, 0.40, 0.58);
+  sh.position.y = 0.004;
+  g.add(sh);
+
+  /* Parked where the ring starts, facing the way it goes. This is the
+     pose he keeps when the visitor has asked for reduced motion or the
+     machine is too slow to animate him, so it has to be a pose worth
+     standing in rather than the origin. */
+  g.position.set(PUP_ROUTE[0].at[0], 0, PUP_ROUTE[0].at[1]);
+  g.rotation.y = Math.atan2(PUP_ROUTE[1].at[0] - PUP_ROUTE[0].at[0],
+                            PUP_ROUTE[1].at[1] - PUP_ROUTE[0].at[1]);
+
+  /* ---- the route, precomputed once -------------------------------- */
+  /* the route is written flat for readability, so lift it to 3D here and
+     keep every other flag on the stop for sample() to hand back */
+  const ring = ringPath(PUP_ROUTE.map((w) => ({ ...w, at: [w.at[0], 0, w.at[1]] })), PUP_SPEED);
+
+  /* One stride is trimmed to divide the ring a whole number of times, so
+     the gait phase comes back to where it started after a lap and the
+     feet never pop at the seam. */
+  const STRIDE = ring.len / Math.max(1, Math.round(ring.len / 0.30));
+
+  /* How far the leg swings is not a taste decision. A leg of this length
+     pivoting at the hip carries its foot backwards at exactly walking
+     pace only for one amplitude, and any other value is a foot sliding
+     on the floor. Solve for it instead of picking it. */
+  const LEG = (0.40 - 0.098) * PUP_SCALE;      // hip height above the foot, in metres
+  const SWING = STRIDE / (LEG * Math.PI * 2);
+
+  const sample = (t) => {
+    const r = ring.sample(t);
+    return { s: r.s, speed: r.speed, hold: r.hold,
+             look: r.stop.look || 0, greet: r.stop.greet || 0 };
+  };
+
+  return {
+    group: g, craft, rig, head, ears, tail, tail2, legs, shins, eyeMat, shadow: sh,
+    curve: ring.curve, sample, period: ring.period, len: ring.len,
+    stride: STRIDE, speed: PUP_SPEED, swing: SWING, leg: LEG,
+  };
+}
+
+/* ------------------------------------------------------- the arm */
+/* A small desk arm clamped to the far end of the bench, where there is
+   real estate to spare and nothing behind it to hide. It moves one
+   machined part back and forth between two spots and looks at it on the
+   way, which is the whole job. Brian built one of these; the site has
+   never had anywhere to show it. */
+
+/* The far end of the bench, past the monitor and clear of the coolant
+   jug and the webcam. Nothing else is using this stretch of MDF, and
+   from the bench station it sits well to the left of the screen. */
+const ARM_BASE = [3.42, 0.95, -2.09];    // bolted to the bench top
+const ARM_A = [3.22, 0.952, -2.20];      // where the part rests
+const ARM_B = [3.22, 0.952, -1.98];      // where it gets put down
+
+export function buildArm(scene) {
+  const g = new THREE.Group();
+  g.name = 'arm';
+  g.position.set(...ARM_BASE);
+  scene.add(g);
+
+  const shell = PUP_SHELL(), joint = PUP_JOINT(), trim = PUP_TRIM();
+  const rbox = (w, h, d, r, mat) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 1, r), mat);
+
+  const plate = rbox(0.13, 0.014, 0.13, 0.006, joint);
+  plate.position.y = 0.007;
+  g.add(plate);
+  /* One inset riser instead of four separate bolt heads. At the size this
+     reads on screen the bolts were four draw calls buying about two
+     pixels each, which is the wrong trade for a prop in the background. */
+  const riser = rbox(0.088, 0.010, 0.088, 0.004, shell);
+  riser.position.y = 0.017;
+  g.add(riser);
+
+  /* yaw column, then shoulder, elbow, wrist: three hinges and a twist */
+  const yaw = new THREE.Group();
+  yaw.position.y = 0.014;
+  g.add(yaw);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.038, 0.055, 10), shell);
+  column.position.y = 0.028;
+  yaw.add(column);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.030, 0.007, 5, 10), trim);
+  collar.rotation.x = Math.PI / 2;
+  collar.position.y = 0.056;
+  yaw.add(collar);
+
+  const shoulder = new THREE.Group();
+  shoulder.position.y = 0.062;
+  yaw.add(shoulder);
+  const shoulderHub = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), joint);
+  shoulder.add(shoulderHub);
+  const upper = rbox(0.036, 0.155, 0.040, 0.013, shell);
+  upper.position.y = 0.082;
+  shoulder.add(upper);
+
+  const elbow = new THREE.Group();
+  elbow.position.y = 0.162;
+  shoulder.add(elbow);
+  const elbowHub = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), joint);
+  elbow.add(elbowHub);
+  const fore = rbox(0.030, 0.140, 0.034, 0.011, shell);
+  fore.position.y = 0.074;
+  elbow.add(fore);
+
+  const wrist = new THREE.Group();
+  wrist.position.y = 0.146;
+  elbow.add(wrist);
+  const wristHub = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), joint);
+  wrist.add(wristHub);
+  /* the twist that turns the part over so the camera can see the far face */
+  const roll = new THREE.Group();
+  wrist.add(roll);
+  const palm = rbox(0.066, 0.022, 0.034, 0.008, joint);
+  palm.position.y = 0.020;
+  roll.add(palm);
+
+  const fingers = [];
+  const fingerGeo = new RoundedBoxGeometry(0.010, 0.038, 0.028, 1, 0.004);
+  for (const sx of [-1, 1]) {
+    const f = new THREE.Mesh(fingerGeo, ALU());
+    f.position.set(sx * 0.023, 0.048, 0);
+    roll.add(f);
+    fingers.push(f);
+  }
+  /* the tip the part hangs from while it is held */
+  const grip = new THREE.Object3D();
+  grip.position.y = 0.062;
+  roll.add(grip);
+
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), new THREE.MeshBasicMaterial({ color: 0x8fffb0 }));
+  led.position.set(0, 0.050, 0.034);
+  yaw.add(led);
+
+  /* The part itself. It lives in the arm's own frame so that handing it
+     between the bench and the gripper is a coordinate change, not a
+     reparent, and it can never be left orphaned mid loop. */
+  /* Machined steel rather than the same aluminium as the fingers, or the
+     part disappears into the hand holding it at any real viewing size. */
+  const part = rbox(0.036, 0.020, 0.036, 0.005, new THREE.MeshStandardMaterial({
+    color: 0x5a6068, roughness: 0.36, metalness: 0.84,
+  }));
+  g.add(part);
+  const spotA = new THREE.Vector3(ARM_A[0] - ARM_BASE[0], ARM_A[1] - ARM_BASE[1] + 0.010, ARM_A[2] - ARM_BASE[2]);
+  const spotB = new THREE.Vector3(ARM_B[0] - ARM_BASE[0], ARM_B[1] - ARM_BASE[1] + 0.010, ARM_B[2] - ARM_BASE[2]);
+  part.position.copy(spotA);
+
+  /* Angles are not eyeballed: the two link solution for this arm puts
+     the wrist exactly over a given spot on the bench, and the gripper is
+     then turned to hang straight down from it. AT sits on the part, OVER
+     clears it by 60 mm, LIFT holds it up in the middle where both spots
+     can see it. Bearings are the compass angles from the base to each
+     spot, so the column turns to face the work rather than guessing. */
+  const B_A = -2.0736, B_B = -1.0680, B_MID = -1.5708;
+  const OVER = { sh: 0.6644, el: 1.4029, wr: 1.0743 };
+  const DOWN = { sh: 0.8894, el: 1.4746, wr: 0.7776 };
+  const UP = { sh: 0.0962, el: 1.6207, wr: 1.4247 };
+  const IDLE = { sh: 0.0277, el: 1.6249, wr: 1.4889 };
+  const at = (bearing, k, grip, rl = 0) => ({ yaw: bearing, sh: k.sh, el: k.el, wr: k.wr, rl, grip });
+
+  const REST = at(B_MID, IDLE, 0.6);
+  const OVER_A = at(B_A, OVER, 1), DOWN_A = at(B_A, DOWN, 1), SHUT_A = at(B_A, DOWN, 0);
+  const UP_A = at(B_A, UP, 0), UP_A_OPEN = at(B_A, UP, 1);
+  const OVER_B = at(B_B, OVER, 0), DOWN_B = at(B_B, DOWN, 0), OPEN_B = at(B_B, DOWN, 1);
+  const UP_B = at(B_B, UP, 1), UP_B_HELD = at(B_B, UP, 0);
+  const CARRY = at(B_MID, UP, 0);
+  /* The look. The gripper stays pointing down so the part hangs below
+     the fingers in clear air, and the wrist turns it through most of a
+     revolution: a part held out flat towards the room would be hidden
+     behind the hand holding it from half the angles in the garage. */
+  const LOOK = at(B_MID, UP, 0, 2.6);
+
+  /* held: 1 while the part is in the hand, so the frame loop knows
+     whether to read its position off the gripper or off the bench.
+     spot names which end it belongs to when it is not held. */
+  const steps = [
+    { dur: 2.4, a: REST, b: REST, held: 0, spot: 'a', rest: 1 },
+    { dur: 1.5, a: REST, b: OVER_A, held: 0, spot: 'a' },
+    { dur: 0.9, a: OVER_A, b: DOWN_A, held: 0, spot: 'a' },
+    { dur: 0.6, a: DOWN_A, b: SHUT_A, held: 0, spot: 'a' },   // fingers close on it
+    { dur: 1.1, a: SHUT_A, b: UP_A, held: 1 },
+    { dur: 0.9, a: UP_A, b: CARRY, held: 1 },
+    { dur: 1.6, a: CARRY, b: LOOK, held: 1 },                 // turn it over
+    { dur: 1.2, a: LOOK, b: CARRY, held: 1 },
+    { dur: 0.9, a: CARRY, b: UP_B_HELD, held: 1 },
+    { dur: 0.9, a: UP_B_HELD, b: DOWN_B, held: 1 },
+    { dur: 0.6, a: DOWN_B, b: OPEN_B, held: 1 },              // fingers let go
+    { dur: 1.0, a: OPEN_B, b: UP_B, held: 0, spot: 'b' },
+    { dur: 1.4, a: UP_B, b: REST, held: 0, spot: 'b' },
+    { dur: 2.8, a: REST, b: REST, held: 0, spot: 'b', rest: 1 },
+    { dur: 1.5, a: REST, b: OVER_B, held: 0, spot: 'b' },
+    { dur: 0.9, a: OVER_B, b: OPEN_B, held: 0, spot: 'b' },
+    { dur: 0.6, a: OPEN_B, b: DOWN_B, held: 0, spot: 'b' },   // and pick it back up
+    { dur: 1.1, a: DOWN_B, b: UP_B_HELD, held: 1 },
+    { dur: 0.9, a: UP_B_HELD, b: CARRY, held: 1 },
+    { dur: 1.3, a: CARRY, b: UP_A, held: 1 },
+    { dur: 0.9, a: UP_A, b: DOWN_A, held: 1 },
+    { dur: 0.6, a: DOWN_A, b: SHUT_A, held: 1 },
+    { dur: 0.0, a: SHUT_A, b: DOWN_A, held: 0, spot: 'a' },
+    { dur: 1.0, a: DOWN_A, b: UP_A_OPEN, held: 0, spot: 'a' },
+    { dur: 1.4, a: UP_A_OPEN, b: REST, held: 0, spot: 'a' },
+  ];
+  let acc = 0;
+  for (const s of steps) { s.t0 = acc; acc += s.dur; s.t1 = acc; }
+
+  const sh2 = blobShadow(0.34, 0.34, 0.34);
+  sh2.position.set(0, 0.010, 0);
+  g.add(sh2);
+
+  /* Parked in the rest pose for the same reason the pup is. */
+  yaw.rotation.y = REST.yaw;
+  shoulder.rotation.x = REST.sh;
+  elbow.rotation.x = REST.el;
+  wrist.rotation.x = REST.wr;
+  fingers[0].position.x = -(0.023 + REST.grip * 0.011);
+  fingers[1].position.x = 0.023 + REST.grip * 0.011;
+
+  return { group: g, yaw, shoulder, elbow, wrist, roll, fingers, grip, led, part,
+           spotA, spotB, steps, period: acc };
+}
+
+/* -------------------------------------------------------- the drone */
+/* A survey quadcopter, the third and smallest of the shop's machines.
+   It owns the air the way the pup owns the floor and the arm owns the
+   bench, which is what keeps three moving things from reading as a
+   circus: they never share a band, and their laps are deliberately
+   coprime so they do not fall into a repeating pattern together.
+
+   It flies at about two metres, under the strip lights at 2.94 and well
+   over the car at 1.46. The ring deliberately does not cross the apron
+   in front of the windscreen, because that is the corridor the engine
+   bay station looks down and a drone parked in it would sit on top of
+   the thing you went there to read. */
+const DRONE_ROUTE = [
+  { at: [2.12, 1.95, 1.10], dwell: 0 },     // over the near lane, by the door end
+  { at: [2.08, 2.10, -1.70], dwell: 1.8 },  // holds to look down the bench
+  { at: [0.90, 2.16, -3.65], dwell: 0 },
+  { at: [-1.25, 2.18, -3.80], dwell: 2.4 }, // holds over Iron Bark's corner
+  { at: [-2.50, 1.95, -2.10], dwell: 0 },
+  { at: [-2.42, 2.05, 0.40], dwell: 1.6 },  // holds over the research wall lane
+  { at: [0.20, 2.22, 0.70], dwell: 0 },     // back across, high over the roof
+];
+const DRONE_SPEED = 0.78;    // metres per second: quicker than the pup, still unhurried
+
+export function buildDrone(scene) {
+  const g = new THREE.Group();
+  g.name = 'drone';
+  scene.add(g);
+
+  /* The airframe hangs off `tilt` so the whole machine can bank and
+     pitch into its turns without the shadow on the floor tipping with
+     it. The shadow is not a child of the drone at all, for the same
+     reason: it belongs to the floor, not to the aircraft. */
+  const tilt = new THREE.Group();
+  g.add(tilt);
+
+  const shell = PUP_SHELL(), joint = PUP_JOINT(), trim = PUP_TRIM();
+  const rbox = (w, h, d, r, mat) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 1, r), mat);
+
+  const body = rbox(0.105, 0.042, 0.135, 0.016, shell);
+  tilt.add(body);
+  const spine = rbox(0.055, 0.010, 0.10, 0.004, trim);
+  spine.position.y = 0.025;
+  tilt.add(spine);
+
+  /* the camera ball underneath, which is the only reason a shop drone
+     exists: it is the same eye the bench webcam is */
+  const gimbal = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), joint);
+  gimbal.position.set(0, -0.026, 0.030);
+  tilt.add(gimbal);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.009, 8), new THREE.MeshBasicMaterial({ color: 0x0b0e13 }));
+  lens.position.set(0, -0.030, 0.049);
+  lens.rotation.x = -0.7;
+  tilt.add(lens);
+
+  /* Four arms and four discs. A disc rather than modelled blades: at
+     this size a spinning two blade rotor strobes into a flicker, and a
+     translucent disc is what the eye reads as "turning too fast to
+     see" anyway, for one mesh instead of three. */
+  /* Two booms crossed through the hull rather than four stubs, and no
+     separate rotor hubs: the hub sits under its own disc and is about a
+     pixel from any angle anyone will see this from, so it was six draw
+     calls buying nothing. */
+  const boomGeo = new RoundedBoxGeometry(0.016, 0.008, 0.232, 1, 0.004);
+  for (const ry of [Math.PI / 4, -Math.PI / 4]) {
+    const boom = new THREE.Mesh(boomGeo, joint);
+    boom.position.y = 0.004;
+    boom.rotation.y = ry;
+    tilt.add(boom);
+  }
+  const discGeo = new THREE.CircleGeometry(0.048, 14);
+  const discMat = new THREE.MeshBasicMaterial({
+    color: 0x9fb4d8, transparent: true, opacity: 0.20, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const rotors = [];
+  for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+    const disc = new THREE.Mesh(discGeo, discMat);
+    disc.position.set(sx * 0.082, 0.021, sz * 0.082);
+    disc.rotation.x = -Math.PI / 2;
+    tilt.add(disc);
+    rotors.push(disc);
+  }
+
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), new THREE.MeshBasicMaterial({ color: 0x8fc0ff }));
+  led.position.set(0, 0.014, -0.062);
+  tilt.add(led);
+
+  /* Its shadow lives on the concrete and only follows it in plan, which
+     is the cheapest honest cue that the thing is genuinely off the
+     ground rather than pasted at head height. */
+  const sh = blobShadow(0.44, 0.44, 0.30);
+  sh.position.y = 0.005;
+  scene.add(sh);
+
+  const ring = ringPath(DRONE_ROUTE, DRONE_SPEED);
+
+  /* Parked on the first leg, level, for reduced motion and weak tiers. */
+  const p0 = ring.curve.getPointAt(0);
+  g.position.copy(p0);
+  sh.position.set(p0.x, 0.005, p0.z);
+
+  return { group: g, tilt, rotors, led, shadow: sh, discMat,
+           curve: ring.curve, sample: ring.sample, len: ring.len,
+           period: ring.period, speed: DRONE_SPEED, cruiseY: 2.03 };
+}
