@@ -140,10 +140,15 @@ export class Shop {
     lp.type = 'lowpass'; lp.frequency.value = 320; lp.Q.value = 2.2;
     const g = this.ctx.createGain();
     const t = this.ctx.currentTime;
+    /* The envelope must fit inside dur: the reduced-motion door runs at
+       0.4s, where the fixed 0.25s attack / 0.5s release put the hold point
+       before currentTime and setValueAtTime throws on a negative t. */
+    const attack = Math.min(0.25, dur * 0.4);
+    const hold = Math.max(t + attack, t + dur - 0.5);
     src.connect(lp).connect(g).connect(this.master);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.25);
-    g.gain.setValueAtTime(vol, t + dur - 0.5);
+    g.gain.exponentialRampToValueAtTime(vol, t + attack);
+    g.gain.setValueAtTime(vol, hold);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.start();
 
@@ -155,7 +160,7 @@ export class Shop {
     of_.type = 'lowpass'; of_.frequency.value = 220;
     o.connect(of_).connect(og).connect(this.master);
     og.gain.setValueAtTime(0.0001, t);
-    og.gain.exponentialRampToValueAtTime(vol * 0.5, t + 0.3);
+    og.gain.exponentialRampToValueAtTime(vol * 0.5, t + Math.min(0.3, dur * 0.5));
     og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.start(t); o.stop(t + dur + 0.1);
   }
