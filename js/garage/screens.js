@@ -243,6 +243,27 @@ export function drawBehavior(cv, phase, flash) {
   });
 }
 
+/* The caption strip under the field-test frame. It is deliberately the
+   same three-part header the board uses, one size down, so the two things
+   on that wall read as parts of one instrument rather than two posters. */
+export function fieldCaptionTexture() {
+  const { c, x, w, h } = P.canvas(512, 85);
+  x.fillStyle = '#0a0d12'; x.fillRect(0, 0, w, h);
+  x.fillStyle = P.BLUE; x.fillRect(0, h - 3, w, 3);
+  const parts = [
+    { t: 'FIELD TEST', weight: 700, color: P.INK },
+    { t: '//', weight: 400, color: P.BLUE },
+    { t: 'gait', weight: 400, color: P.INK2 },
+  ];
+  let px = 20;
+  for (const p of parts) {
+    P.line(x, p.t, { font: P.fonts.mono, size: 34, weight: p.weight, color: p.color, x: px, y: 58, track: 2 });
+    x.font = `${p.weight} 34px ${P.fonts.mono}`;
+    px += [...p.t].reduce((a, ch) => a + x.measureText(ch).width + 2, -2) + 16;
+  }
+  return P.toTexture(c);
+}
+
 /* the exit sign over the back door */
 export function exitSignTexture() {
   const { c, x, w, h } = P.canvas(512, 160);

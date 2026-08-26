@@ -196,6 +196,7 @@ async function start() {
   const plateAim = new THREE.Object3D();
   plateAim.up.set(0, 0, 1);              // the bay's own up, which is Z
   let boardT = 0, boardPhase = -1, boardFlash = -1;
+  let filmT = 0, filmN = -1;
   let dogPerk = 0, dogHop = 0;
 
   const lockButtons = (ms) => {
@@ -790,12 +791,16 @@ async function start() {
       Math.min(1, 0.75 * blink * eyeUp),
       Math.min(1, 1 * blink * eyeUp));
 
-    /* the behavior board steps through the real state machine */
+    /* the behavior board steps through the real state machine: a state a
+       second, so the sequence reads as a machine ticking rather than a
+       slideshow. The flash windows are scaled to the shorter step so the
+       moment of arrival still lands instead of clipping. */
     if (tier >= 2) {
+      const STEP = 1.0;
       boardT += dt;
-      const phaseNow = Math.floor(boardT / 1.9) % 4;
-      const since = boardT - Math.floor(boardT / 1.9) * 1.9;
-      const flashNow = since < 0.34 ? 1 : since < 0.62 ? 0.4 : 0;
+      const phaseNow = Math.floor(boardT / STEP) % 4;
+      const since = boardT - Math.floor(boardT / STEP) * STEP;
+      const flashNow = since < 0.20 ? 1 : since < 0.36 ? 0.4 : 0;
       if (phaseNow !== boardPhase || flashNow !== boardFlash) {
         boardPhase = phaseNow; boardFlash = flashNow;
         S.drawBehavior(dog.board.canvas, boardPhase, boardFlash);
@@ -803,6 +808,15 @@ async function start() {
       }
       const led = flashNow > 0.5 ? 1 : 0.55;
       dog.dockLed.material.color.setRGB(0.62 * led, 0.75 * led, 1 * led);
+    }
+
+    /* the field-test clip walks at the rate it was filmed. Under reduced
+       motion it holds on the first frame, which is still a photograph of
+       the robot rather than an empty frame. */
+    if (tier >= 2 && !reduced) {
+      filmT += dt;
+      const n = Math.floor(filmT * dog.film.fps) % dog.film.count;
+      if (n !== filmN) { filmN = n; dog.film.show(n); }
     }
 
     rig.update(dt, now);
@@ -889,6 +903,7 @@ async function start() {
     ray,
     cursor(x, y) { pointerNdc.set(x, y); },
     get boardPhase() { return boardPhase; },
+    get filmFrame() { return filmN; },
     get locked() { return buttonsLocked; },
     unlock() { buttonsLocked = false; },
     /* Read the drawing buffer straight back. Headless compositors on this

@@ -388,19 +388,41 @@ export function buildDog(scene) {
   pool.position.y = 0.012;
   g.add(pool);
 
-  /* a clip light over the corner, aimed at the dock */
-  const lampArm = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6), STEEL());
-  lampArm.position.set(-0.15, 1.62, -0.30);
-  lampArm.rotation.z = 0.5;
-  g.add(lampArm);
-  const lampHead = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.14, 12, 1, true), STEEL());
-  lampHead.position.set(-0.02, 1.42, -0.24);
-  lampHead.rotation.x = -0.5;
-  g.add(lampHead);
-  const lampLens = new THREE.Mesh(new THREE.CircleGeometry(0.085, 12), new THREE.MeshBasicMaterial({ color: 0xe8f0ff }));
-  lampLens.position.set(0.02, 1.36, -0.18);
-  lampLens.rotation.x = -2.1;
-  g.add(lampLens);
+  /* A shop lamp on a drop rod, tilted to aim at the dock. It hangs off the
+     ceiling rather than clipping to thin air, and the three parts share one
+     pivot so the rod, the shade and the lens are one object: before, each
+     was rotated on its own axis by its own angle, so the rod ran through
+     the shade at a seam and the lens sat off to one side of the mouth.
+     The shade is double sided too. Open-ended and front-faced, the near
+     wall was culled and you looked straight through it into the inside of
+     the far wall, which read as a folded shard rather than a reflector. */
+  const lamp = new THREE.Group();
+  lamp.position.set(0, 0, -0.34);
+  g.add(lamp);
+  const CEIL_Y = ROOM.h, PIVOT_Y = 1.46;   // low enough to sit inside the station framing
+  const canopy = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.052, 0.022, 12), STEEL());
+  canopy.position.y = CEIL_Y - 0.011;
+  lamp.add(canopy);
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, CEIL_Y - 0.022 - PIVOT_Y, 6), STEEL());
+  rod.position.y = (CEIL_Y - 0.022 + PIVOT_Y) / 2;
+  lamp.add(rod);
+  const yoke = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), STEEL());
+  yoke.position.y = PIVOT_Y;
+  lamp.add(yoke);
+
+  const lampHead = new THREE.Group();
+  lampHead.position.y = PIVOT_Y;
+  lampHead.rotation.x = -0.26;   // aimed down the rod at the dock
+  lamp.add(lampHead);
+  const shadeMat = STEEL();
+  shadeMat.side = THREE.DoubleSide;
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.17, 20, 1, true), shadeMat);
+  shade.position.y = -0.085;
+  lampHead.add(shade);
+  const lampLens = new THREE.Mesh(new THREE.CircleGeometry(0.112, 20), new THREE.MeshBasicMaterial({ color: 0xe8f0ff }));
+  lampLens.position.y = -0.166;
+  lampLens.rotation.x = Math.PI / 2;   // a circle faces +Z, so this turns it down
+  lampHead.add(lampLens);
   const clip = new THREE.PointLight(0xdbe6ff, 2.2, 2.9, 2.0);
   clip.position.set(0.05, 1.25, -0.05);
   g.add(clip);
@@ -560,9 +582,61 @@ export function buildDog(scene) {
   boardGlow.position.set(0.20, 1.02, -0.70);
   g.add(boardGlow);
 
+  /* ---- field test frame ------------------------------------------- */
+  /* A clip of the real Iron Bark walking a tiled floor, hung to the
+     camera's left of the board. An animated GIF uploads only its first
+     frame as a texture, so the clip ships as a sprite sheet and is
+     stepped by the render loop instead. */
+  const walk = { cols: 9, rows: 5, count: 45, cell: 256 };
+  const sheetW = walk.cols * walk.cell, sheetH = walk.rows * walk.cell;
+  const walkTex = new THREE.TextureLoader().load('img/ironbark-walk.jpg');
+  walkTex.colorSpace = THREE.SRGBColorSpace;
+  walkTex.generateMipmaps = false;
+  walkTex.minFilter = walkTex.magFilter = THREE.LinearFilter;
+  walkTex.wrapS = walkTex.wrapT = THREE.ClampToEdgeWrapping;
+  // inset a texel each side so linear sampling never drags in the next cell
+  walkTex.repeat.set((walk.cell - 2) / sheetW, (walk.cell - 2) / sheetH);
+  const showWalkFrame = (n) => {
+    const k = ((n % walk.count) + walk.count) % walk.count;
+    const col = k % walk.cols, row = Math.floor(k / walk.cols);
+    walkTex.offset.set((col * walk.cell + 1) / sheetW,
+      1 - (row * walk.cell + walk.cell - 1) / sheetH);
+  };
+  showWalkFrame(0);
+
+  /* The dock is yawed, but this hangs on a room wall, so it is placed in
+     world space and lifted back into the group's frame. */
+  const intoGroup = (wx, wy, wz) => {
+    const dx = wx - g.position.x, dz = wz - g.position.z;
+    const c = Math.cos(-g.rotation.y), s = Math.sin(-g.rotation.y);
+    return new THREE.Vector3(dx * c + dz * s, wy, -dx * s + dz * c);
+  };
+
+  /* On the side wall rather than the back one: the back wall runs out at
+     the corner a hand's width past the board, and the side wall is both
+     empty this deep into the room and square-on enough to hang a picture
+     the size it deserves. Turned a few degrees off the wall, toward the
+     station, so the clip is not read edge-on. */
+  const FILM_TURN = 0.175;
+  const film = new THREE.Group();
+  film.position.copy(intoGroup(X0 + 0.09, 1.15, -4.75));
+  film.rotation.y = (Math.PI / 2 - FILM_TURN) - g.rotation.y;
+  g.add(film);
+  const filmFrame = new THREE.Mesh(new RoundedBoxGeometry(0.56, 0.64, 0.038, 2, 0.014), new THREE.MeshStandardMaterial({
+    color: 0x2a3039, roughness: 0.62, metalness: 0.35,
+  }));
+  film.add(filmFrame);
+  const filmFace = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), new THREE.MeshBasicMaterial({ map: walkTex }));
+  filmFace.position.set(0, 0.05, 0.021);
+  film.add(filmFace);
+  const filmCap = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.075), new THREE.MeshBasicMaterial({ map: S.fieldCaptionTexture() }));
+  filmCap.position.set(0, -0.2425, 0.021);
+  film.add(filmCap);
+
   return {
     group: g, rig, head, eyeMat, dockLed, ears, tail, tail2, legs, shins, antennaTip,
     board: { canvas: boardCv, texture: boardTex, group: board },
+    film: { group: film, show: showWalkFrame, count: walk.count, fps: 10 },
     hotspots: [{ id: 'dog', mesh: dogHit, size: [0.9, 0.9] }],
   };
 }
