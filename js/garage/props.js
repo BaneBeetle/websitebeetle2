@@ -4,6 +4,7 @@
    maps to something real, and nothing is here purely as set dressing. */
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as P from './paint.js';
 import * as S from './screens.js';
 import { ROOM, X0, X1, Z_BACK, blobShadow, bakeAO } from './scene.js';
@@ -354,21 +355,27 @@ export function buildDog(scene) {
   g.rotation.y = 0.62;
   scene.add(g);
 
-  const shell = new THREE.MeshStandardMaterial({ color: 0x2b323c, roughness: 0.42, metalness: 0.62 });
-  const joint = new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.7, metalness: 0.4 });
-  const trim = new THREE.MeshStandardMaterial({ color: 0x3b6fd4, roughness: 0.3, metalness: 0.5 });
+  const shell = new THREE.MeshStandardMaterial({ color: 0x2f3742, roughness: 0.38, metalness: 0.55 });
+  const joint = new THREE.MeshStandardMaterial({ color: 0x13171c, roughness: 0.66, metalness: 0.42 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x3b6fd4, roughness: 0.28, metalness: 0.5 });
 
-  /* dock */
-  const dock = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.05, 0.56), new THREE.MeshStandardMaterial({
+  /* Everything above the dock hangs off `rig`, so the whole animal can
+     lean, bob and bounce without dragging the dock with it. */
+  const rig = new THREE.Group();
+  g.add(rig);
+
+  /* rounded boxes throughout: the same shapes, just not sharp */
+  const rbox = (w, h, d, r, mat) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r), mat);
+
+  /* ---- dock ------------------------------------------------------- */
+  const dock = new THREE.Mesh(new RoundedBoxGeometry(0.76, 0.05, 0.60, 2, 0.014), new THREE.MeshStandardMaterial({
     color: 0x1d222a, roughness: 0.6, metalness: 0.4,
   }));
   dock.position.y = 0.025;
   g.add(dock);
-  const dockLed = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.014, 0.014), new THREE.MeshBasicMaterial({ color: 0x9dc0ff }));
-  dockLed.position.set(0, 0.054, 0.26);
+  const dockLed = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.014, 0.014), new THREE.MeshBasicMaterial({ color: 0x9dc0ff }));
+  dockLed.position.set(0, 0.054, 0.27);
   g.add(dockLed);
-  /* the dock is its own light source, which is why the dog is parked in
-     the darkest corner and still readable */
   const dockGlow = new THREE.PointLight(0x8fb4ff, 1.6, 2.6, 2.2);
   dockGlow.position.set(0, 0.62, 0.34);
   g.add(dockGlow);
@@ -381,6 +388,7 @@ export function buildDog(scene) {
   pool.position.y = 0.012;
   g.add(pool);
 
+  /* a clip light over the corner, aimed at the dock */
   const lampArm = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6), STEEL());
   lampArm.position.set(-0.15, 1.62, -0.30);
   lampArm.rotation.z = 0.5;
@@ -397,86 +405,134 @@ export function buildDog(scene) {
   clip.position.set(0.05, 1.25, -0.05);
   g.add(clip);
 
-  /* body, sitting: haunches down, front legs straight */
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.52), shell);
-  body.position.set(0, 0.40, 0.02);
-  body.rotation.x = -0.05;
-  g.add(body);
-  const spine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.44), joint);
-  spine.position.set(0, 0.50, 0.02);
-  spine.rotation.x = -0.05;
-  g.add(spine);
-  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.012, 0.10), trim);
-  vent.position.set(0, 0.503, -0.10);
-  vent.rotation.x = -0.05;
-  g.add(vent);
+  /* ---- body: shorter and rounder than a real quadruped ------------ */
+  const body = rbox(0.27, 0.20, 0.46, 0.055, shell);
+  body.position.set(0, 0.42, 0.00);
+  rig.add(body);
+  const spine = rbox(0.17, 0.055, 0.40, 0.022, joint);
+  spine.position.set(0, 0.525, 0.00);
+  rig.add(spine);
+  const vent = rbox(0.20, 0.012, 0.10, 0.005, trim);
+  vent.position.set(0, 0.528, -0.11);
+  rig.add(vent);
 
-  const legPair = (z, upperLen, upperRot, lowerLen, lowerRot, hipY) => {
+  /* ---- legs: stubby, which is most of the cuteness ---------------- */
+  const legs = [];
+  const legPair = (z, hipY) => {
     for (const sx of [-1, 1]) {
-      const hip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10), joint);
-      hip.rotation.z = Math.PI / 2;
-      hip.position.set(sx * 0.145, hipY, z);
-      g.add(hip);
-      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.042, upperLen, 0.062), shell);
-      upper.position.set(sx * 0.145, hipY - Math.cos(upperRot) * upperLen / 2, z + Math.sin(upperRot) * upperLen / 2);
-      upper.rotation.x = -upperRot;
-      g.add(upper);
-      const kneeY = hipY - Math.cos(upperRot) * upperLen;
-      const kneeZ = z + Math.sin(upperRot) * upperLen;
-      const lower = new THREE.Mesh(new THREE.BoxGeometry(0.030, lowerLen, 0.042), shell);
-      lower.position.set(sx * 0.145, kneeY - Math.cos(lowerRot) * lowerLen / 2, kneeZ + Math.sin(lowerRot) * lowerLen / 2);
-      lower.rotation.x = -lowerRot;
-      g.add(lower);
-      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), joint);
-      foot.position.set(sx * 0.145, kneeY - Math.cos(lowerRot) * lowerLen, kneeZ + Math.sin(lowerRot) * lowerLen);
-      g.add(foot);
+      const leg = new THREE.Group();
+      leg.position.set(sx * 0.135, hipY, z);
+      rig.add(leg);
+      const hip = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), joint);
+      leg.add(hip);
+      const upper = rbox(0.058, 0.15, 0.070, 0.024, shell);
+      upper.position.set(0, -0.085, 0.006);
+      leg.add(upper);
+      const knee = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), joint);
+      knee.position.set(0, -0.163, 0.006);
+      leg.add(knee);
+      const lower = rbox(0.046, 0.13, 0.052, 0.020, shell);
+      lower.position.set(0, -0.235, 0.002);
+      leg.add(lower);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.040, 12, 10), joint);
+      foot.position.set(0, -0.302, 0.008);
+      foot.scale.set(1, 0.72, 1.15);
+      leg.add(foot);
+      legs.push(leg);
     }
   };
-  /* Standing on the dock, knees slightly loaded. A sit pose kept reading
-     as two legs that failed to render, so this is the honest one. */
-  legPair(0.20, 0.17, 0.30, 0.17, -0.30, 0.40);    // front
-  legPair(-0.19, 0.17, -0.34, 0.17, 0.34, 0.36);   // rear
+  legPair(0.175, 0.40);    // front
+  legPair(-0.165, 0.395);  // rear
   for (const sx of [-1, 1]) {
-    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.11, 0.13), shell);
-    shoulder.position.set(sx * 0.145, 0.395, 0.185);
-    g.add(shoulder);
-    const haunch = new THREE.Mesh(new THREE.BoxGeometry(0.070, 0.13, 0.15), shell);
-    haunch.position.set(sx * 0.145, 0.355, -0.175);
-    g.add(haunch);
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 10), shell);
+    shoulder.position.set(sx * 0.132, 0.425, 0.175);
+    shoulder.scale.set(0.9, 1, 1.15);
+    rig.add(shoulder);
+    const haunch = new THREE.Mesh(new THREE.SphereGeometry(0.066, 12, 10), shell);
+    haunch.position.set(sx * 0.132, 0.415, -0.170);
+    haunch.scale.set(0.9, 1, 1.2);
+    rig.add(haunch);
   }
 
-  /* head on a short neck: this is the part that moves */
+  /* ---- head: bigger than scale wants, which is the trick ---------- */
   const head = new THREE.Group();
-  head.position.set(0, 0.52, 0.28);
-  g.add(head);
-  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.13, 0.19), shell);
+  head.position.set(0, 0.545, 0.245);
+  rig.add(head);
+  const skull = rbox(0.195, 0.155, 0.195, 0.058, shell);
   head.add(skull);
-  /* a sensor visor rather than a face: this is a machine, and a machine
-     with two big round eyes reads as a toy */
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.055, 0.02), new THREE.MeshStandardMaterial({
-    color: 0x0d1015, roughness: 0.18, metalness: 0.5,
-  }));
-  visor.position.set(0, 0.012, 0.098);
-  head.add(visor);
-  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.055, 0.06), joint);
-  muzzle.position.set(0, -0.048, 0.115);
+  const muzzle = rbox(0.115, 0.075, 0.085, 0.030, joint);
+  muzzle.position.set(0, -0.045, 0.115);
   head.add(muzzle);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.020, 10, 8), joint);
+  nose.position.set(0, -0.038, 0.162);
+  nose.scale.set(1.25, 0.8, 0.7);
+  head.add(nose);
+
+  /* big rounded eyes on a dark face plate */
+  const face = rbox(0.155, 0.078, 0.018, 0.026, new THREE.MeshStandardMaterial({
+    color: 0x0c0f14, roughness: 0.16, metalness: 0.55,
+  }));
+  face.position.set(0, 0.022, 0.094);
+  head.add(face);
   const eyeMat = new THREE.MeshBasicMaterial({ color: 0x8fc0ff });
+  const eyes = [];
   for (const sx of [-1, 1]) {
-    const e = new THREE.Mesh(new THREE.PlaneGeometry(0.032, 0.014), eyeMat);
-    e.position.set(sx * 0.038, 0.012, 0.109);
+    const e = new THREE.Mesh(new THREE.CircleGeometry(0.030, 18), eyeMat);
+    e.position.set(sx * 0.042, 0.022, 0.104);
     head.add(e);
+    eyes.push(e);
   }
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.10, 6), joint);
-  antenna.position.set(0.06, 0.12, -0.04);
+
+  /* ears, which perk when the cursor comes near */
+  const ears = [];
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Group();
+    ear.position.set(sx * 0.068, 0.072, -0.020);
+    head.add(ear);
+    const shellEar = rbox(0.042, 0.085, 0.028, 0.013, shell);
+    shellEar.position.y = 0.042;
+    ear.add(shellEar);
+    const inner = new THREE.Mesh(new THREE.PlaneGeometry(0.016, 0.036), new THREE.MeshStandardMaterial({
+      color: 0x25446f, roughness: 0.5, metalness: 0.3,
+    }));
+    inner.position.set(0, 0.042, 0.0155);
+    ear.add(inner);
+    ear.rotation.x = 0.30;
+    ear.rotation.z = sx * 0.12;
+    ears.push(ear);
+  }
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.062, 6), joint);
+  antenna.position.set(0.050, 0.110, -0.058);
+  antenna.rotation.z = -0.16;
   head.add(antenna);
+  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(0.0095, 8, 8), trim);
+  antennaTip.position.set(0.045, 0.142, -0.058);
+  head.add(antennaTip);
+
+  /* ---- tail: two segments that wag ------------------------------- */
+  const tail = new THREE.Group();
+  tail.position.set(0, 0.475, -0.225);
+  rig.add(tail);
+  const tail1 = rbox(0.040, 0.040, 0.115, 0.017, shell);
+  tail1.position.set(0, 0.020, -0.058);
+  tail.add(tail1);
+  const tail2 = new THREE.Group();
+  tail2.position.set(0, 0.038, -0.112);
+  tail.add(tail2);
+  const tail2m = rbox(0.032, 0.032, 0.095, 0.014, shell);
+  tail2m.position.set(0, 0.014, -0.048);
+  tail2.add(tail2m);
+  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.021, 10, 8), trim);
+  tailTip.position.set(0, 0.026, -0.095);
+  tail2.add(tailTip);
+  tail.rotation.x = -0.45;
 
   const sh = blobShadow(0.8, 0.7, 0.55);
   sh.position.y = 0.004;
   g.add(sh);
 
-  const dogHit = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.80, 0.80), new THREE.MeshBasicMaterial({ visible: false }));
-  dogHit.position.set(0, 0.40, 0.02);
+  const dogHit = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.86, 0.88), new THREE.MeshBasicMaterial({ visible: false }));
+  dogHit.position.set(0, 0.42, 0.02);
   g.add(dogHit);
 
   /* The behavior board on the wall behind the dock. It reads out the
@@ -488,7 +544,7 @@ export function buildDog(scene) {
   board.position.set(0.128, 1.10, -0.953);
   board.rotation.y = -0.62;   // undo the dock's yaw so it faces the room
   g.add(board);
-  const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.42, 0.035), new THREE.MeshStandardMaterial({
+  const boardFrame = new THREE.Mesh(new RoundedBoxGeometry(0.98, 0.42, 0.035, 2, 0.012), new THREE.MeshStandardMaterial({
     color: 0x2a3039, roughness: 0.62, metalness: 0.35,
   }));
   board.add(boardFrame);
@@ -500,7 +556,7 @@ export function buildDog(scene) {
   g.add(boardGlow);
 
   return {
-    group: g, head, eyeMat, dockLed,
+    group: g, rig, head, eyeMat, dockLed, ears, tail, tail2, legs, antennaTip,
     board: { canvas: boardCv, texture: boardTex, group: board },
     hotspots: [{ id: 'dog', mesh: dogHit, size: [0.9, 0.9] }],
   };

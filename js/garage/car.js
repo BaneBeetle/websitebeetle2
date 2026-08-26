@@ -109,6 +109,24 @@ export async function loadCar(scene, onProgress) {
   hood.frustumCulled = false;
   hinge.add(hood);
 
+  /* The body shell is not the only mesh with hood-side geometry: the
+     cowl vent belongs to Material.008, which also carries the bumpers
+     and the sills. Split it on the same planes so the vent travels with
+     the panel it is set into instead of staying behind on the car. */
+  for (const name of ['Material.008']) {
+    const extra = pick(name);
+    if (!extra) continue;
+    const cut = splitByPlanes(extra.geometry, planes);
+    if (!cut.inside.attributes.position.count) { cut.inside.dispose(); cut.outside.dispose(); continue; }
+    extra.geometry.dispose();
+    extra.geometry = cut.outside;
+    cut.inside.translate(0, -HOOD.yBack, -HINGE_Z);
+    const piece = new THREE.Mesh(cut.inside, extra.material);
+    piece.name = 'hood-' + name;
+    piece.frustumCulled = false;
+    hinge.add(piece);
+  }
+
   /* Underside skin: the shell is one-sided, so an open hood would show
      nothing from behind. A flipped copy set slightly inboard gives it a
      matte painted underside, which is also where the dyno sheet lives. */

@@ -197,7 +197,7 @@ export function behaviorCanvas() {
   return P.canvas(768, 300);
 }
 
-export function drawBehavior(cv, phase, lit) {
+export function drawBehavior(cv, phase, flash) {
   const { x, w, h } = cv;
   x.clearRect(0, 0, w, h);
   x.fillStyle = '#0a0d12'; x.fillRect(0, 0, w, h);
@@ -208,15 +208,17 @@ export function drawBehavior(cv, phase, lit) {
   P.line(x, 'behavior', { font: P.fonts.mono, size: 30, weight: 400, color: P.INK2, x: 286, y: 66, track: 1 });
 
   const bw = 150, bh = 62, gap = 22, y0 = 110;
+  const prev = (phase + DOG_PHASES.length - 1) % DOG_PHASES.length;
   DOG_PHASES.forEach((name, i) => {
     const px = 40 + i * (bw + gap);
     const active = i === phase;
-    if (active && lit) {
-      x.fillStyle = '#10224a'; x.fillRect(px, y0, bw, bh);
-      x.strokeStyle = P.BLUE_LIT; x.lineWidth = 4;
-    } else if (active) {
-      x.fillStyle = '#0c1526'; x.fillRect(px, y0, bw, bh);
-      x.strokeStyle = P.BLUE; x.lineWidth = 3;
+    if (active) {
+      // the active state stays solid so the sequence reads as stepping.
+      // the flash is the moment of arrival, not a flicker.
+      x.fillStyle = flash > 0.5 ? '#1d3a72' : '#12244e';
+      x.fillRect(px, y0, bw, bh);
+      x.strokeStyle = flash > 0.5 ? '#cfe0ff' : P.BLUE_LIT;
+      x.lineWidth = flash > 0.5 ? 5 : 4;
     } else {
       x.strokeStyle = '#2b323d'; x.lineWidth = 3;
     }
@@ -224,11 +226,14 @@ export function drawBehavior(cv, phase, lit) {
     P.line(x, name, {
       font: P.fonts.mono, size: name.length > 6 ? 24 : 27,
       weight: active ? 700 : 400,
-      color: active ? (lit ? '#ffffff' : P.INK2) : P.INK3,
+      color: active ? '#ffffff' : P.INK3,
       x: px + bw / 2, y: y0 + 41, align: 'center', track: 2,
     });
     if (i < DOG_PHASES.length - 1) {
-      x.strokeStyle = '#2b323d'; x.lineWidth = 3;
+      // the connector into the active box lights as the state arrives
+      const carrying = flash > 0.25 && i === prev && phase !== 0;
+      x.strokeStyle = carrying ? P.BLUE_LIT : '#2b323d';
+      x.lineWidth = carrying ? 5 : 3;
       x.beginPath(); x.moveTo(px + bw, y0 + bh / 2); x.lineTo(px + bw + gap, y0 + bh / 2); x.stroke();
     }
   });

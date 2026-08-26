@@ -192,7 +192,8 @@ async function start() {
   const lookAt = new THREE.Vector3();
   const headWorld = new THREE.Vector3();
   const viewDir = new THREE.Vector3();
-  let boardT = 0, boardPhase = -1, boardLit = false;
+  let boardT = 0, boardPhase = -1, boardFlash = -1;
+  let dogPerk = 0, dogHop = 0;
 
   const lockButtons = (ms) => {
     buttonsLocked = true;
@@ -500,6 +501,10 @@ async function start() {
         shop.click();
         if (mode === 'bench') { benchScreen(bench.index); openPanel('bench'); return; }
         return goto('bench');
+      case 'dog':
+        shop.click();
+        dogHop = 1;
+        return goto('dog');
       default:
         shop.click();
         return goto(id);
@@ -631,42 +636,69 @@ async function start() {
       dressing.motorLed.material.color.setRGB(0.56, 1, 0.69);
     }
 
-    /* Iron Bark watches the cursor. The pointer is cast onto a plane
-       through the head that faces the camera, so the head tracks the
-       actual point under the cursor from any angle rather than guessing
-       from screen coordinates. */
+    /* Iron Bark watches the cursor, and the rest of him follows the
+       head: the body leans after it, the tail wags harder the closer the
+       pointer gets, the ears come up, and clicking him makes him hop. */
     dog.head.getWorldPosition(headWorld);
     camera.getWorldDirection(viewDir);
     lookPlane.setFromNormalAndCoplanarPoint(viewDir.negate(), headWorld);
     lookRay.setFromCamera(pointerNdc, camera);
-    let yaw = 0, pitchTgt = 0;
+    let yaw = 0, pitchTgt = 0, near = 0;
     if (lookRay.ray.intersectPlane(lookPlane, lookAt)) {
+      near = THREE.MathUtils.clamp(1 - lookAt.distanceTo(headWorld) / 1.1, 0, 1);
       dog.group.worldToLocal(lookAt);
       const hx = lookAt.x - dog.head.position.x;
       const hy = lookAt.y - dog.head.position.y;
       const hz = lookAt.z - dog.head.position.z;
-      // clamped so it never cranes past what a neck could do
+      // clamped so he never cranes past what a neck could do
       yaw = THREE.MathUtils.clamp(Math.atan2(hx, Math.max(0.12, hz)), -0.72, 0.72);
       pitchTgt = THREE.MathUtils.clamp(-Math.atan2(hy, Math.hypot(hx, hz)), -0.34, 0.30);
     }
     const track = reduced ? 1 : 1 - Math.pow(0.02, dt);
+    const slow = reduced ? 1 : 1 - Math.pow(0.08, dt);
     dog.head.rotation.y += (yaw - dog.head.rotation.y) * track;
     dog.head.rotation.x += (pitchTgt - dog.head.rotation.x) * track;
-    const blink = Math.sin(clock.t * 0.9) > 0.985 ? 0.15 : 1;
-    dog.eyeMat.color.setRGB(0.56 * blink, 0.75 * blink, 1 * blink);
+    dogPerk += (near - dogPerk) * slow;
 
-    /* the behavior board cycles the state machine, active state blinking */
+    // the body swings after the head, but only about a third as far
+    dog.rig.rotation.y += (yaw * 0.34 - dog.rig.rotation.y) * slow;
+    dog.rig.rotation.z += (-yaw * 0.06 - dog.rig.rotation.z) * slow;
+    // breathing, plus a hop that decays after a click
+    dogHop = Math.max(0, dogHop - dt * 2.6);
+    const breathe = Math.sin(clock.t * 1.7) * 0.006;
+    dog.rig.position.y = breathe + Math.sin(dogHop * Math.PI) * 0.075;
+    dog.rig.rotation.x = -dogPerk * 0.05 + Math.sin(clock.t * 1.7 + 1) * 0.004;
+
+    // tail: faster and wider the closer the pointer gets
+    const wag = clock.t * (3.4 + dogPerk * 9);
+    dog.tail.rotation.y = Math.sin(wag) * (0.12 + dogPerk * 0.34);
+    dog.tail.rotation.x = -0.45 - dogPerk * 0.28;
+    dog.tail2.rotation.y = Math.sin(wag - 0.7) * (0.14 + dogPerk * 0.38);
+    // ears up when he is paying attention
+    for (const [i, ear] of dog.ears.entries()) {
+      ear.rotation.x = 0.30 - dogPerk * 0.46;
+      ear.rotation.z = (i ? 1 : -1) * (0.12 + dogPerk * 0.10);
+    }
+    const blink = Math.sin(clock.t * 0.9) > 0.985 ? 0.15 : 1;
+    const eyeUp = 1 + dogPerk * 0.45;
+    dog.eyeMat.color.setRGB(
+      Math.min(1, 0.56 * blink * eyeUp),
+      Math.min(1, 0.75 * blink * eyeUp),
+      Math.min(1, 1 * blink * eyeUp));
+
+    /* the behavior board steps through the real state machine */
     if (tier >= 2) {
       boardT += dt;
-      const litNow = (boardT % 0.86) < 0.56;
-      const phaseNow = Math.floor(boardT / 2.4) % 4;
-      if (litNow !== boardLit || phaseNow !== boardPhase) {
-        boardLit = litNow; boardPhase = phaseNow;
-        S.drawBehavior(dog.board.canvas, boardPhase, boardLit);
+      const phaseNow = Math.floor(boardT / 1.9) % 4;
+      const since = boardT - Math.floor(boardT / 1.9) * 1.9;
+      const flashNow = since < 0.34 ? 1 : since < 0.62 ? 0.4 : 0;
+      if (phaseNow !== boardPhase || flashNow !== boardFlash) {
+        boardPhase = phaseNow; boardFlash = flashNow;
+        S.drawBehavior(dog.board.canvas, boardPhase, boardFlash);
         dog.board.texture.needsUpdate = true;
       }
-      dog.dockLed.material.color.setRGB(
-        boardLit ? 0.62 : 0.24, boardLit ? 0.75 : 0.32, boardLit ? 1 : 0.48);
+      const led = flashNow > 0.5 ? 1 : 0.55;
+      dog.dockLed.material.color.setRGB(0.62 * led, 0.75 * led, 1 * led);
     }
 
     rig.update(dt, now);
@@ -750,6 +782,9 @@ async function start() {
     jump(name) { setStation(name); rig.jumpTo(name); mode = name; openPanel(name); },
     openDoor(k) { room.doorGroup.position.y = room.doorH * k; },
     panel: { open: openPanel, close: closePanel },
+    ray,
+    cursor(x, y) { pointerNdc.set(x, y); },
+    get boardPhase() { return boardPhase; },
     get locked() { return buttonsLocked; },
     unlock() { buttonsLocked = false; },
     /* Read the drawing buffer straight back. Headless compositors on this
