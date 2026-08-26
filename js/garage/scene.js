@@ -10,6 +10,7 @@ import * as P from './paint.js';
 export const ROOM = { w: 7.2, d: 9.4, h: 3.05 };
 export const X0 = -ROOM.w / 2, X1 = ROOM.w / 2;
 export const Z_DOOR = 4.1, Z_BACK = -5.3;
+export const DOOR_H = 2.35;
 
 /* Floor stencils are the navigation. UVs run 0..1 across the floor plane:
    u maps to x (left to right), v maps to z (back to front). */
@@ -67,7 +68,7 @@ export function buildRoom(scene, quality) {
   /* ---- roller door ------------------------------------------------ */
   /* The door is the loader. Progress raises it, and the same object
      closes again at the exit station. */
-  const doorH = 2.35, doorW = 4.9;
+  const doorH = DOOR_H, doorW = 4.9;
   const doorGroup = new THREE.Group();
   doorGroup.position.set(0, 0, Z_DOOR - 0.06);
   room.add(doorGroup);
@@ -144,7 +145,7 @@ export function buildRoom(scene, quality) {
   /* ---- strip lights ----------------------------------------------- */
   const glow = P.glowTexture();
   const strips = [];
-  for (const sz of [1.6, -2.4]) {
+  for (const sz of [1.9, -0.7, -3.5]) {
     const g = new THREE.Group();
     g.position.set(0, ROOM.h - 0.11, sz);
     room.add(g);

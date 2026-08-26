@@ -3,7 +3,7 @@
    well-behaved kiosk: if the mode does not match, the click does nothing. */
 
 import * as THREE from 'three';
-import { buildRoom, buildLights, blobShadow } from './scene.js';
+import { buildRoom, buildLights } from './scene.js';
 import { envTexture } from './paint.js';
 import { loadCar } from './car.js';
 import * as Props from './props.js';
@@ -64,7 +64,41 @@ async function start() {
   scene.environment = envTexture();
 
   const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.05, 60);
-  const rig = new Rig(camera);
+  /* Portrait phones see a narrow slice, so every station steps back. */
+  const pullFor = () => (innerWidth / innerHeight < 0.85 ? 1.42 : innerWidth < 900 ? 1.15 : 1);
+  const rig = new Rig(camera, { pull: pullFor() });
+  /* Portrait sees a narrow slice, so the wide stations aim at the one
+     thing worth seeing instead of the whole wall. */
+  if (rig.pull > 1.2) {
+    POI.wall.target = [-3.34, 1.78, -1.40];
+    POI.wall.dist = 1.95;
+    POI.wall.cage.dist = [1.60, 2.60];
+    POI.bench.dist = 1.85;
+    POI.car.az = 0.60;
+    POI.car.dist = 3.80;
+    POI.car.cage.dist = [3.20, 4.60];
+    POI.bay.pol = 0.95;
+    POI.bay.dist = 1.95;
+    POI.bay.cage.dist = [1.55, 2.30];
+    rig.jumpTo('home');
+  }
+
+  let resizeTimer = null;
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight, false);
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const p = pullFor();
+      if (p === rig.pull) return;
+      rig.pull = p;
+      rig.jumpTo(rig.station);
+    }, 220);
+  });
+  addEventListener('orientationchange', () => {
+    setTimeout(() => dispatchEvent(new Event('resize')), 120);
+  });
 
   const room = buildRoom(scene);
   const lights = buildLights(scene);
@@ -106,7 +140,9 @@ async function start() {
   /* Invisible hitboxes larger than the thing they stand for, so a hotspot
      is easy to hit from any legal camera angle. */
   const targets = [];
+  const FAT = coarse ? 1.45 : 1;
   const addHit = (id, geo, pos, rot) => {
+    if (FAT !== 1) geo.scale(FAT, FAT, FAT);
     const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ visible: false }));
     m.position.copy(pos);
     if (rot) m.rotation.copy(rot);
@@ -133,6 +169,7 @@ async function start() {
   for (const src of [bench, wall, dog, bike, exit]) {
     for (const h of src.hotspots) {
       h.mesh.userData.hit = h.id;
+      if (FAT !== 1 && h.size) h.mesh.scale.set(FAT, FAT, 1);
       targets.push(h.mesh);
     }
   }
@@ -170,7 +207,7 @@ async function start() {
   function arrive(name, opts) {
     mode = name;
     shop.chirp();
-    openPanel(name, opts.detail);
+    openPanel(opts.panel || name, opts.detail);
   }
 
   function setStation(name) {
@@ -203,7 +240,7 @@ async function start() {
     home: () => `
       <h2>Brian's Garage</h2>
       <p class="kicker">One car, one bench, and everything I have taken apart.</p>
-      <p>Nothing here is a nav bar. The floor is painted with where things are, and anything that looks like it opens, opens. Start with the hood.</p>
+      <p>Nothing here is a nav bar. The floor is stencilled with where things are, and anything that looks like it opens, opens. Start with the hood.</p>
       <div class="btn-row">
         <button class="btn" data-act="hood">Open the hood</button>
         <a class="btn btn-ghost" href="${PERSON.resume}" target="_blank" rel="noopener">Resume, PDF</a>
@@ -250,7 +287,7 @@ async function start() {
 
     wall: () => `
       <h2>The wall</h2>
-      <p class="kicker">School, research, and four years of teaching.</p>
+      <p class="kicker">School, research, and the teaching that came with it.</p>
       ${EDUCATION.map((e) => `
         <dl class="spec"><div><dt>${esc(e.when)}</dt><dd><b>${esc(e.school)}</b><small>${esc(e.degree)}${e.note ? '. ' + esc(e.note) : ''}</small></dd></div></dl>`).join('')}
       <ul class="panel-list">
@@ -318,7 +355,7 @@ async function start() {
     return {
       car: 'S54, Alpha-N, 317.27 hp',
       bay: 'Under the hood',
-      bench: `${PROJECTS.length} builds`,
+      bench: `Six on the bench`,
       wall: 'Columbia, UC Irvine, AERA 2025',
       dog: 'Robot dog on its dock',
       bike: 'Off the clock',
@@ -336,11 +373,18 @@ async function start() {
     panel.classList.add('open');
     panel.scrollTop = 0;
     panel.setAttribute('aria-hidden', 'false');
+    panel.inert = false;
   }
   function closePanel() {
+    if (panel.contains(document.activeElement)) {
+      const cur = rail.querySelector('[aria-current="true"]');
+      if (cur) cur.focus({ preventScroll: true });
+    }
     panel.classList.remove('open');
     panel.setAttribute('aria-hidden', 'true');
+    panel.inert = true;
   }
+  panel.inert = true;
 
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
@@ -437,7 +481,7 @@ async function start() {
       case 'lights': toggleNight(); return;
       case 'hood': shop.click(); return openHood();
       case 'car': shop.click(); return goto('car');
-      case 'paper': shop.click(); return goto('wall', { detail: null }), openPanel('paper');
+      case 'paper': shop.click(); return goto('wall', { panel: 'paper' });
       case 'spec-engine': shop.click(); return openPanel('bay', { spec: 'engine' });
       case 'spec-intake': shop.click(); return openPanel('bay', { spec: 'intake' });
       case 'spec-tune': shop.click(); return openPanel('bay', { spec: 'tune' });
@@ -451,8 +495,8 @@ async function start() {
     }
   }
 
-  let plateFlash = 0;
-  function flashPlate() { plateFlash = 1; }
+  let openerBlink = 0;
+  function flashPlate() { openerBlink = 1.6; }
 
   function toggleNight() {
     nightMode = !nightMode;
@@ -480,13 +524,26 @@ async function start() {
     sndBtn.textContent = on ? 'Sound on' : 'Sound off';
     if (on) shop.click();
   });
-  $('.tool-read').addEventListener('click', () => {
-    document.body.classList.toggle('reading');
-    const on = document.body.classList.contains('reading');
+  const doc = $('#doc');
+  function setReading(on, focusDoc) {
+    document.body.classList.toggle('reading', on);
     $('.tool-read').setAttribute('aria-pressed', String(on));
-    if (on) { document.body.classList.remove('gl-on'); closePanel(); }
-    else document.body.classList.add('gl-on');
-  });
+    $('.tool-read').textContent = on ? 'Back to the garage' : 'Read as page';
+    doc.inert = !on;
+    if (on) {
+      document.body.classList.remove('gl-on');
+      closePanel();
+      looping = false;
+      if (focusDoc) { doc.setAttribute('tabindex', '-1'); doc.focus({ preventScroll: false }); }
+    } else {
+      document.body.classList.add('gl-on');
+      boot.hidden = true;
+      loop();
+    }
+  }
+  $('.tool-read').addEventListener('click', () => { shop.click(); setReading(!document.body.classList.contains('reading'), true); });
+  $('.hud-mark').addEventListener('click', (e) => { e.preventDefault(); setReading(true, true); });
+  $('.skip').addEventListener('click', (e) => { e.preventDefault(); setReading(true, true); });
   $('.panel-close').addEventListener('click', () => { shop.click(); closePanel(); });
 
   addEventListener('keydown', (e) => {
@@ -529,17 +586,13 @@ async function start() {
     last = now;
     clock.t += dt;
 
-    hoodT += (hoodTarget - hoodT) * (1 - Math.pow(0.002, dt));
+    hoodT = reduced ? hoodTarget : hoodT + (hoodTarget - hoodT) * (1 - Math.pow(0.002, dt));
     car.setHood(hoodT);
     hoodHit.position.y = 0.92 + hoodT * 0.34;
 
-    lampT += ((lampsOn ? 1 : 0) - lampT) * (1 - Math.pow(0.004, dt));
+    lampT = reduced ? (lampsOn ? 1 : 0) : lampT + ((lampsOn ? 1 : 0) - lampT) * (1 - Math.pow(0.004, dt));
     for (const m of car.lights.head) {
-      if (m.material) m.material.emissive = m.material.emissive || new THREE.Color();
-      if (m.material && m.material.emissive) {
-        m.material.emissive.setRGB(lampT * 0.85, lampT * 0.9, lampT);
-        m.material.emissiveIntensity = 1;
-      }
+      if (m.material && m.material.emissive) m.material.emissive.setRGB(lampT * 0.85, lampT * 0.9, lampT);
     }
 
     // night mode: the acceptable version of "the room changes"
@@ -555,13 +608,14 @@ async function start() {
     }
 
     if (tier >= 2) dressing.blades.rotation.z -= dt * 7.4;
-    if (tier >= 2 && mode !== 'bench') {
-      // the bench screen breathes while nobody is reading it
-      bench.screenMat.uniforms.uTime.value = clock.t;
-    }
-    if (plateFlash > 0) {
-      plateFlash = Math.max(0, plateFlash - dt * 1.6);
-      dressing.motorLed.material.color.setRGB(1, 0.75 - plateFlash * 0.4, 0.35);
+    // the bench screen is always on, even when nobody is reading it
+    if (tier >= 2) bench.screenMat.uniforms.uTime.value = clock.t;
+    // sound the horn and the door opener notices, which is the whole point
+    // of the Carbeetle project sitting on the ceiling above you
+    if (openerBlink > 0) {
+      openerBlink = Math.max(0, openerBlink - dt * 1.4);
+      const on = Math.sin(openerBlink * 34) > 0;
+      dressing.motorLed.material.color.setRGB(on ? 0.48 : 0.1, on ? 0.68 : 0.16, on ? 1 : 0.24);
     } else {
       dressing.motorLed.material.color.setRGB(0.56, 1, 0.69);
     }
@@ -583,7 +637,7 @@ async function start() {
   setProgress(1);
   startBtn.hidden = false;
   startBtn.focus({ preventScroll: true });
-  bootNote.textContent = 'The door opener is one of the projects. It seemed rude not to use it.';
+  bootNote.textContent = 'One of the projects in this garage is the door opener.';
 
   let running = false;
   function begin() {
@@ -593,6 +647,7 @@ async function start() {
     sndBtn.setAttribute('aria-pressed', 'true');
     sndBtn.textContent = 'Sound on';
     document.body.classList.add('gl-on');
+    doc.inert = true;
     boot.style.setProperty('--door', '1');
     shop.door(reduced ? 0.4 : 2.2);
 
@@ -654,6 +709,8 @@ async function start() {
     jump(name) { setStation(name); rig.jumpTo(name); mode = name; openPanel(name); },
     openDoor(k) { room.doorGroup.position.y = room.doorH * k; },
     panel: { open: openPanel, close: closePanel },
+    get locked() { return buttonsLocked; },
+    unlock() { buttonsLocked = false; },
     /* Read the drawing buffer straight back. Headless compositors on this
        machine hand out stale frames; this cannot. */
     grab(type) {

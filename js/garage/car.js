@@ -15,7 +15,7 @@ import { blobShadow } from './scene.js';
    the Z-up to Y-up matrix, so these planes are expressed in that local
    frame and the hood group inherits the same transform. */
 const HOOD = { yBack: -1.20, yFront: -2.30, xHalf: 0.780, zAtBack: 0.86, slope: 0.228 };
-export const HOOD_OPEN = -0.86;
+export const HOOD_OPEN = -0.80;
 
 const PAINT = 0x27427f;          // Interlagos Blue
 const CARBON = 0x1b1e24;
@@ -118,8 +118,8 @@ export async function loadCar(scene, onProgress) {
   hinge.add(under);
 
   const dyno = dynoSheet();
-  dyno.position.set(0.30, -1.72 - HOOD.yBack, 0.905 - HINGE_Z);
-  dyno.rotation.set(Math.PI + 0.16, 0, 0.05);
+  dyno.position.set(0.30, -1.66 - HOOD.yBack, 0.895 - HINGE_Z);
+  dyno.rotation.set(Math.PI + 0.34, 0, 0.05);
   hinge.add(dyno);
 
   /* prop rod, because a hood that floats reads as a bug */
@@ -191,7 +191,7 @@ function buildBay() {
      PlaneGeometry faces +Z, so rotation.x = PI/2 faces the nose and
      rotation.y = PI/2 faces +X. Every placement below follows that. */
   const FLOOR_Z = 0.30, TOP_Z = 0.80;
-  const Y_BULK = -1.17, Y_NOSE = -2.24, X_SIDE = 0.71;
+  const Y_BULK = -1.17, Y_NOSE = -2.24, X_SIDE = 0.685;
 
   const steel = new THREE.MeshStandardMaterial({ color: 0x4c545f, metalness: 0.85, roughness: 0.42 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1c2029, metalness: 0.3, roughness: 0.78 });
@@ -212,21 +212,16 @@ function buildBay() {
   plane(X_SIDE * 2, bayLen, [0, (Y_BULK + Y_NOSE) / 2, FLOOR_Z], [0, 0, 0]);                    // floor
   plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_BULK, (TOP_Z + FLOOR_Z) / 2], [Math.PI / 2, 0, 0]);  // bulkhead
   plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_NOSE, (TOP_Z + FLOOR_Z) / 2], [-Math.PI / 2, 0, 0]); // nose panel
-  /* inner fenders as arch shells, so the cavity has a wheel-well curve
-     instead of two flat walls catching the work light */
+  /* Inner fenders stay inboard of the shut line by a clear margin. They
+     cannot poke through the bodywork from any angle the cage allows, and
+     the small gap they leave at the top shows the inside of the fender
+     skin, which is what you would actually see. */
   for (const sx of [-1, 1]) {
-    const arch = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.30, 0.30, bayLen, 14, 1, true, sx > 0 ? Math.PI * 0.5 : Math.PI, Math.PI * 0.5),
-      liner.clone()
-    );
-    arch.material.side = THREE.BackSide;
-    arch.rotation.x = Math.PI / 2;
-    arch.position.set(sx * (X_SIDE + 0.02), (Y_BULK + Y_NOSE) / 2, FLOOR_Z + 0.30);
-    g.add(arch);
-    const skirt = new THREE.Mesh(new THREE.PlaneGeometry(bayLen, 0.30), liner);
-    skirt.position.set(sx * (X_SIDE + 0.02), (Y_BULK + Y_NOSE) / 2, FLOOR_Z + 0.15);
-    skirt.rotation.set(0, -sx * Math.PI / 2, 0);
-    g.add(skirt);
+    plane(TOP_Z - FLOOR_Z, bayLen, [sx * X_SIDE, (Y_BULK + Y_NOSE) / 2, (TOP_Z + FLOOR_Z) / 2],
+          [0, -sx * Math.PI / 2, 0]);
+    const lip = new THREE.Mesh(new THREE.PlaneGeometry(0.09, bayLen), liner);
+    lip.position.set(sx * (X_SIDE - 0.045), (Y_BULK + Y_NOSE) / 2, TOP_Z);
+    g.add(lip);
   }
 
   /* strut towers at the bulkhead corners */
@@ -336,6 +331,23 @@ function buildBay() {
     fin.position.set(-0.60 + i * 0.086, -2.26, FLOOR_Z + 0.16);
     g.add(fin);
   }
+
+  /* brake booster and reservoir on the bulkhead, so the back of the bay
+     reads as a firewall rather than a black rectangle */
+  const booster = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.16, 16), steel);
+  booster.rotation.x = Math.PI / 2;
+  booster.rotation.z = Math.PI / 2;
+  booster.rotation.set(0, Math.PI / 2, 0);
+  booster.position.set(-0.30, -1.28, FLOOR_Z + 0.22);
+  g.add(booster);
+  const resv = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.13), new THREE.MeshStandardMaterial({
+    color: 0xd8dbe0, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.85,
+  }));
+  resv.position.set(-0.30, -1.28, FLOOR_Z + 0.36);
+  g.add(resv);
+  const fuse = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.10), dark);
+  fuse.position.set(0.52, -1.30, FLOOR_Z + 0.16);
+  g.add(fuse);
 
   /* a work light clipped to the brace: a garage truth that also solves
      the problem of lighting a cavity with no shadow maps */

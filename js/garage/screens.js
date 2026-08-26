@@ -149,7 +149,8 @@ export function noteTexture(title, lines, accent = P.BLUE) {
   const { c, x, w, h } = P.canvas(512, 384);
   x.fillStyle = '#e8e4d6'; x.fillRect(0, 0, w, h);
   x.fillStyle = accent; x.fillRect(0, 0, w, 10);
-  P.line(x, title, { font: P.fonts.display, size: 34, color: '#181c22', x: 32, y: 84, upper: true });
+  const size = title.length > 12 ? 26 : 34;
+  P.line(x, title, { font: P.fonts.display, size, color: '#181c22', x: 32, y: 84, upper: true });
   let y = 130;
   for (const l of lines) {
     y = P.wrap(x, l, { size: 20, color: '#4c515a', x: 32, y, max: w - 64, leading: 1.4 }) + 12;

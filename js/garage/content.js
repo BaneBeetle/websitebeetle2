@@ -47,7 +47,7 @@ export const BAY_PROJECTS = [
   {
     id: 'door',
     title: 'The garage door itself',
-    kicker: 'The opener this whole site is named after',
+    kicker: 'The other half of the Carbeetle project',
     date: 'Oct 2024',
     body: 'The classifier is only half of it. The other half is a relay wired into the roller door, so the car is the key. That is the door you just came through.',
     tags: ['Relay', 'Camera feed', 'Home automation'],
@@ -179,6 +179,7 @@ export const EDUCATION = [
 export const EXPERIENCE = [
   {
     id: 'calit2',
+    short: 'Calit2',
     role: 'Machine Learning Engineer',
     org: 'Calit2',
     when: 'Oct 2024 to Mar 2025',
@@ -190,6 +191,7 @@ export const EXPERIENCE = [
   },
   {
     id: 'ta',
+    short: 'UC Irvine',
     role: 'Guest Lecturer and Teaching Assistant',
     org: 'University of California, Irvine',
     when: 'Sep 2023 to Mar 2025',
@@ -201,7 +203,8 @@ export const EXPERIENCE = [
   },
   {
     id: 'nsf',
-    role: 'NSF Research Experience for Undergraduates',
+    short: 'NSF REU',
+    role: 'Research Experience for Undergraduates',
     org: 'Elementary Computing for All',
     when: 'Jan 2024',
     where: 'Irvine, CA',
@@ -212,7 +215,8 @@ export const EXPERIENCE = [
   },
   {
     id: 'aied',
-    role: 'Artificial Intelligence Research Assistant',
+    short: 'GenAI Ed',
+    role: 'AI Research Assistant',
     org: 'GenAI in Education',
     when: 'Oct 2024',
     where: 'Irvine, CA',
@@ -245,7 +249,7 @@ export const BIKE = {
 
 export const DOG = {
   title: 'Iron Bark',
-  body: 'The robot dog from the workbench, parked on its dock. Sit, follow, search, explore.',
+  body: 'The robot dog from the workbench, parked on its dock. Idle, follow, search, explore.',
   ref: 'ironbark',
 };
 

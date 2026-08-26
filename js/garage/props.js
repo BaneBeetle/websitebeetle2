@@ -7,9 +7,9 @@ import * as THREE from 'three';
 import * as P from './paint.js';
 import * as S from './screens.js';
 import { ROOM, X0, X1, Z_BACK, blobShadow, bakeAO } from './scene.js';
-import { PROJECTS, EXPERIENCE, EDUCATION, PAPER, BIKE, PERSON } from './content.js';
+import { EXPERIENCE, EDUCATION, PAPER, BIKE } from './content.js';
 
-const MDF = () => new THREE.MeshStandardMaterial({ color: 0x6a5b47, roughness: 0.86, metalness: 0.02 });
+const MDF = () => new THREE.MeshStandardMaterial({ color: 0x565049, roughness: 0.88, metalness: 0.02 });
 const STEEL = () => new THREE.MeshStandardMaterial({ color: 0x3d444e, roughness: 0.48, metalness: 0.82 });
 const DARK = () => new THREE.MeshStandardMaterial({ color: 0x1b1f26, roughness: 0.8, metalness: 0.25 });
 const ALU = () => new THREE.MeshStandardMaterial({ color: 0x98a1ac, roughness: 0.32, metalness: 0.92 });
@@ -38,16 +38,19 @@ function framed(url, w, h, depth = 0.03) {
 export function buildSign(scene, touch) {
   const g = new THREE.Group();
   const board = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 0.6, 0.05),
+    new THREE.BoxGeometry(1.86, 0.48, 0.05),
     new THREE.MeshStandardMaterial({ map: touch ? S.touchSignTexture() : S.signTexture(), roughness: 0.7, metalness: 0.2 })
   );
   g.add(board);
   for (const sx of [-1, 1]) {
-    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.42, 5), STEEL());
-    chain.position.set(sx * 1.02, 0.51, 0);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.46, 5), STEEL());
+    chain.position.set(sx * 0.78, 0.47, 0);
     g.add(chain);
   }
-  g.position.set(0.15, ROOM.h - 0.66, 3.05);
+  g.position.set(0.42, 2.08, 3.40);
+  /* on a phone the sign would fill the arrival frame, so it hangs deeper
+     in the room where it reads once you are inside */
+  if (touch) { g.position.set(0.05, 2.20, 1.15); g.scale.setScalar(0.85); }
   g.rotation.y = 0.02;
   scene.add(g);
   return g;
@@ -135,7 +138,10 @@ export function buildBench(scene) {
   const foot = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.02, 0.20), STEEL());
   foot.position.set(0, -0.73, 0.02);
   mon.add(foot);
-  hotspots.push({ id: 'bench', mesh: screen, size: [1.10, 0.66] });
+  const monHit = new THREE.Mesh(new THREE.BoxGeometry(1.30, 0.86, 0.30), new THREE.MeshBasicMaterial({ visible: false }));
+  monHit.position.z = 0.14;
+  mon.add(monHit);
+  hotspots.push({ id: 'bench', mesh: monHit, size: [1.30, 0.86] });
 
   /* Raspberry Pi on a breadboard: the Carbeetle classifier and the arm
      controller both run on one of these */
@@ -211,6 +217,8 @@ export function buildBench(scene) {
   shot.rotation.x = -0.10;
   g.add(shot);
 
+  for (const m of [top, shelf, drawers]) bakeAO(m, { reach: 0.7, strength: 0.5 });
+
   const sh = blobShadow(1.1, len + 0.6, 0.5);
   sh.position.set(wallX - 0.34, 0.008, zc);
   g.add(sh);
@@ -247,9 +255,10 @@ export function buildWall(scene) {
 
   // a plywood backing board, so the wall reads as a working wall
   const backer = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.95, 3.8), new THREE.MeshStandardMaterial({
-    color: 0x4c4335, roughness: 0.92,
+    color: 0x453f36, roughness: 0.93,
   }));
   backer.position.set(wx, 1.62, zc);
+  bakeAO(backer, { reach: 1.1, strength: 0.42 });
   g.add(backer);
 
   const face = (mesh, y, z, ry = 0, rz = 0) => {
@@ -300,19 +309,19 @@ export function buildWall(scene) {
 
   /* the thermal plot, taped up like a working printout */
   const plot = framed('img/photo/thermal-plot-600.jpg', 0.46, 0.31);
-  plot.position.set(wx + 0.04, 1.06, zc - 0.30);
+  plot.position.set(wx + 0.04, 1.30, zc - 0.62);
   plot.rotation.y = Math.PI / 2;
   plot.rotation.z = 0.02;
   g.add(plot);
 
   /* a strip of experience index cards running along the bottom */
-  let z = zc - 1.28;
+  let z = zc - 1.42;
   for (const e of EXPERIENCE) {
     const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24), new THREE.MeshStandardMaterial({
-      map: S.noteTexture(e.org.split(',')[0], [e.role, e.when], '#3b6fd4'), roughness: 0.95,
+      map: S.noteTexture(e.short || e.org, [e.role, e.when], '#3b6fd4'), roughness: 0.95,
     }));
-    face(card, 0.86, z, 0, (Math.random() - 0.5) * 0.06);
-    z += 0.60;
+    face(card, 0.80, z, 0, (Math.random() - 0.5) * 0.05);
+    z += 0.68;
   }
 
   /* a strip light clipped over the board */
@@ -355,22 +364,51 @@ export function buildDog(scene) {
   }));
   dock.position.y = 0.025;
   g.add(dock);
-  const dockLed = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.012, 0.012), new THREE.MeshBasicMaterial({ color: 0x7aa7ff }));
-  dockLed.position.set(0, 0.052, 0.26);
+  const dockLed = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.014, 0.014), new THREE.MeshBasicMaterial({ color: 0x9dc0ff }));
+  dockLed.position.set(0, 0.054, 0.26);
   g.add(dockLed);
+  /* the dock is its own light source, which is why the dog is parked in
+     the darkest corner and still readable */
+  const dockGlow = new THREE.PointLight(0x8fb4ff, 1.6, 2.6, 2.2);
+  dockGlow.position.set(0, 0.62, 0.34);
+  g.add(dockGlow);
+  const pool = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 1.3),
+    new THREE.MeshBasicMaterial({ map: P.glowTexture('#8fb4ff'), transparent: true, opacity: 0.16,
+                                  depthWrite: false, blending: THREE.AdditiveBlending })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.y = 0.012;
+  g.add(pool);
+
+  const lampArm = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6), STEEL());
+  lampArm.position.set(-0.15, 1.62, -0.30);
+  lampArm.rotation.z = 0.5;
+  g.add(lampArm);
+  const lampHead = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.14, 12, 1, true), STEEL());
+  lampHead.position.set(-0.02, 1.42, -0.24);
+  lampHead.rotation.x = -0.5;
+  g.add(lampHead);
+  const lampLens = new THREE.Mesh(new THREE.CircleGeometry(0.085, 12), new THREE.MeshBasicMaterial({ color: 0xe8f0ff }));
+  lampLens.position.set(0.02, 1.36, -0.18);
+  lampLens.rotation.x = -2.1;
+  g.add(lampLens);
+  const clip = new THREE.PointLight(0xdbe6ff, 2.2, 2.9, 2.0);
+  clip.position.set(0.05, 1.25, -0.05);
+  g.add(clip);
 
   /* body, sitting: haunches down, front legs straight */
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.52), shell);
-  body.position.set(0, 0.36, 0.02);
-  body.rotation.x = -0.24;
+  body.position.set(0, 0.40, 0.02);
+  body.rotation.x = -0.05;
   g.add(body);
   const spine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.44), joint);
-  spine.position.set(0, 0.47, 0.02);
-  spine.rotation.x = -0.24;
+  spine.position.set(0, 0.50, 0.02);
+  spine.rotation.x = -0.05;
   g.add(spine);
   const vent = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.012, 0.10), trim);
-  vent.position.set(0, 0.474, -0.10);
-  vent.rotation.x = -0.24;
+  vent.position.set(0, 0.503, -0.10);
+  vent.rotation.x = -0.05;
   g.add(vent);
 
   const legPair = (z, upperLen, upperRot, lowerLen, lowerRot, hipY) => {
@@ -379,13 +417,13 @@ export function buildDog(scene) {
       hip.rotation.z = Math.PI / 2;
       hip.position.set(sx * 0.145, hipY, z);
       g.add(hip);
-      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.05, upperLen, 0.07), shell);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.042, upperLen, 0.062), shell);
       upper.position.set(sx * 0.145, hipY - Math.cos(upperRot) * upperLen / 2, z + Math.sin(upperRot) * upperLen / 2);
       upper.rotation.x = -upperRot;
       g.add(upper);
       const kneeY = hipY - Math.cos(upperRot) * upperLen;
       const kneeZ = z + Math.sin(upperRot) * upperLen;
-      const lower = new THREE.Mesh(new THREE.BoxGeometry(0.036, lowerLen, 0.05), shell);
+      const lower = new THREE.Mesh(new THREE.BoxGeometry(0.030, lowerLen, 0.042), shell);
       lower.position.set(sx * 0.145, kneeY - Math.cos(lowerRot) * lowerLen / 2, kneeZ + Math.sin(lowerRot) * lowerLen / 2);
       lower.rotation.x = -lowerRot;
       g.add(lower);
@@ -394,25 +432,40 @@ export function buildDog(scene) {
       g.add(foot);
     }
   };
-  legPair(0.20, 0.24, 0.10, 0.16, -0.06, 0.40);    // front, propped up
-  legPair(-0.18, 0.17, 1.15, 0.17, -0.95, 0.30);   // rear, folded under
+  /* Standing on the dock, knees slightly loaded. A sit pose kept reading
+     as two legs that failed to render, so this is the honest one. */
+  legPair(0.20, 0.17, 0.30, 0.17, -0.30, 0.40);    // front
+  legPair(-0.19, 0.17, -0.34, 0.17, 0.34, 0.36);   // rear
+  for (const sx of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.11, 0.13), shell);
+    shoulder.position.set(sx * 0.145, 0.395, 0.185);
+    g.add(shoulder);
+    const haunch = new THREE.Mesh(new THREE.BoxGeometry(0.070, 0.13, 0.15), shell);
+    haunch.position.set(sx * 0.145, 0.355, -0.175);
+    g.add(haunch);
+  }
 
   /* head on a short neck: this is the part that moves */
   const head = new THREE.Group();
-  head.position.set(0, 0.50, 0.26);
+  head.position.set(0, 0.52, 0.28);
   g.add(head);
-  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.15, 0.20), shell);
+  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.13, 0.19), shell);
   head.add(skull);
-  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.09), joint);
-  snout.position.set(0, -0.025, 0.13);
-  head.add(snout);
+  /* a sensor visor rather than a face: this is a machine, and a machine
+     with two big round eyes reads as a toy */
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.055, 0.02), new THREE.MeshStandardMaterial({
+    color: 0x0d1015, roughness: 0.18, metalness: 0.5,
+  }));
+  visor.position.set(0, 0.012, 0.098);
+  head.add(visor);
+  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.055, 0.06), joint);
+  muzzle.position.set(0, -0.048, 0.115);
+  head.add(muzzle);
   const eyeMat = new THREE.MeshBasicMaterial({ color: 0x8fc0ff });
-  const eyes = [];
   for (const sx of [-1, 1]) {
-    const e = new THREE.Mesh(new THREE.CircleGeometry(0.021, 12), eyeMat);
-    e.position.set(sx * 0.045, 0.03, 0.101);
+    const e = new THREE.Mesh(new THREE.PlaneGeometry(0.032, 0.014), eyeMat);
+    e.position.set(sx * 0.038, 0.012, 0.109);
     head.add(e);
-    eyes.push(e);
   }
   const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.10, 6), joint);
   antenna.position.set(0.06, 0.12, -0.04);
@@ -422,9 +475,13 @@ export function buildDog(scene) {
   sh.position.y = 0.004;
   g.add(sh);
 
+  const dogHit = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.80, 0.80), new THREE.MeshBasicMaterial({ visible: false }));
+  dogHit.position.set(0, 0.40, 0.02);
+  g.add(dogHit);
+
   return {
     group: g, head, eyeMat, dockLed,
-    hotspots: [{ id: 'dog', mesh: body, size: [0.6, 0.7] }],
+    hotspots: [{ id: 'dog', mesh: dogHit, size: [0.9, 0.9] }],
   };
 }
 
@@ -433,7 +490,8 @@ export function buildDog(scene) {
 export function buildBike(scene) {
   const g = new THREE.Group();
   g.name = 'bike';
-  g.position.set(1.68, 1.82, Z_BACK + 0.34);
+  g.position.set(-0.55, 1.86, Z_BACK + 0.34);
+  g.scale.setScalar(0.9);
   scene.add(g);
 
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x384049, roughness: 0.35, metalness: 0.7 });
@@ -474,20 +532,23 @@ export function buildBike(scene) {
   bar([-0.10, 0.26, 0], [-0.05, -0.10, 0]);  // seat tube
   bar([-0.05, -0.10, 0], [-0.60, 0, 0]);     // chainstay
   bar([-0.05, -0.10, 0], [0.60, 0, 0], 0.017);
-  bar([0.26, 0.30, 0], [0.20, 0.44, 0], 0.016);
-  const barTop = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.52, 7), frameMat);
-  barTop.rotation.x = Math.PI / 2;
-  barTop.position.set(0.20, 0.45, 0);
-  g.add(barTop);
+  bar([0.26, 0.30, 0], [0.22, 0.46, 0], 0.016);
+  const bars = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.58, 7), frameMat);
+  bars.rotation.x = Math.PI / 2;
+  bars.position.set(0.22, 0.47, 0);
+  g.add(bars);
   const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.05, 0.10), new THREE.MeshStandardMaterial({
     color: 0x16191e, roughness: 0.6,
   }));
   saddle.position.set(-0.13, 0.36, 0);
   saddle.rotation.z = -0.12;
   g.add(saddle);
-  const crank = new THREE.Mesh(new THREE.TorusGeometry(0.10, 0.010, 5, 16), rim);
-  crank.position.set(-0.05, -0.10, 0.03);
+  const crank = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.010, 5, 18), rim);
+  crank.position.set(-0.05, -0.10, 0.045);
   g.add(crank);
+  const crankArm = new THREE.Mesh(new THREE.BoxGeometry(0.017, 0.15, 0.014), frameMat);
+  crankArm.position.set(-0.05, -0.03, 0.06);
+  g.add(crankArm);
 
   /* the hooks it hangs from */
   for (const hx of [-0.60, 0.60]) {
@@ -502,9 +563,21 @@ export function buildBike(scene) {
     g.add(arm);
   }
 
-  /* the real photo, pinned next to it */
-  const shot = framed(BIKE.photo, 0.34, 0.50);
-  shot.position.set(0.06, -0.30, -0.28);
+  /* a picture light over the mount, so the back wall is not a void */
+  const lightBar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.06, 0.10), STEEL());
+  lightBar.position.set(0, 0.62, -0.16);
+  g.add(lightBar);
+  const lightTube = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.018, 0.05), new THREE.MeshBasicMaterial({ color: 0xdfe9ff }));
+  lightTube.position.set(0, 0.585, -0.13);
+  g.add(lightTube);
+  const wash = new THREE.PointLight(0xcbd9f2, 2.0, 3.4, 2.1);
+  wash.position.set(0, 0.30, 0.34);
+  g.add(wash);
+
+  /* the real photo, pinned under it */
+  const shot = framed(BIKE.photo, 0.32, 0.47);
+  shot.position.set(0.62, -0.62, -0.26);
+  shot.rotation.z = 0.03;
   g.add(shot);
 
   const hit = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.4), new THREE.MeshBasicMaterial({ visible: false }));
@@ -543,9 +616,17 @@ export function buildExit(scene) {
   }));
   sign.position.set(x, 2.32, z + 0.07);
   g.add(sign);
-  const signGlow = new THREE.PointLight(0x8fb4ff, 0.9, 2.0, 2);
-  signGlow.position.set(x, 2.2, z + 0.4);
+  const signGlow = new THREE.PointLight(0xa8c4ff, 2.4, 4.2, 2.1);
+  signGlow.position.set(x, 2.16, z + 0.55);
   g.add(signGlow);
+  const spill = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, 2.0),
+    new THREE.MeshBasicMaterial({ map: P.glowTexture('#9dbcf0'), transparent: true, opacity: 0.13,
+                                  depthWrite: false, blending: THREE.AdditiveBlending })
+  );
+  spill.rotation.x = -Math.PI / 2;
+  spill.position.set(x, 0.014, z + 0.9);
+  g.add(spill);
 
   /* the light switch: the one control that changes the room */
   const plate = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.20, 0.02), new THREE.MeshStandardMaterial({

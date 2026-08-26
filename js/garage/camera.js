@@ -5,7 +5,7 @@
    viewer out of the edit. */
 
 import * as THREE from 'three';
-import { X0, X1, Z_BACK, Z_DOOR, ROOM } from './scene.js';
+import { X0, X1, Z_BACK, Z_DOOR, DOOR_H, ROOM } from './scene.js';
 
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
@@ -24,8 +24,8 @@ export const POI = {
     label: 'Carbeetle',
   },
   bay: {
-    target: [-0.30, 0.82, 1.38], az: 0.12, pol: 0.66, dist: 1.72,
-    cage: { az: [-0.46, 0.72], pol: [0.44, 0.98], dist: [1.35, 2.30] },
+    target: [-0.30, 0.95, 1.28], az: 0.14, pol: 0.86, dist: 2.45,
+    cage: { az: [-0.50, 0.78], pol: [0.58, 1.26], dist: [1.95, 3.00] },
     label: 'Engine bay',
   },
   bench: {
@@ -39,18 +39,18 @@ export const POI = {
     label: 'Research wall',
   },
   dog: {
-    target: [-2.30, 0.44, -4.40], az: 0.72, pol: 1.40, dist: 1.55,
-    cage: { az: [0.02, 1.52], pol: [1.14, 1.60], dist: [1.15, 2.30] },
+    target: [-2.26, 0.40, -4.30], az: 1.00, pol: 1.44, dist: 1.22,
+    cage: { az: [0.14, 1.72], pol: [1.18, 1.60], dist: [0.98, 1.95] },
     label: 'Iron Bark',
   },
   bike: {
-    target: [1.68, 1.76, -4.96], az: 0.06, pol: 1.44, dist: 2.05,
-    cage: { az: [-0.66, 0.76], pol: [1.14, 1.70], dist: [1.60, 2.80] },
+    target: [-0.55, 1.62, -4.92], az: 0.02, pol: 1.42, dist: 2.20,
+    cage: { az: [-0.70, 0.74], pol: [1.12, 1.68], dist: [1.75, 2.95] },
     label: 'The bike',
   },
   exit: {
-    target: [2.10, 1.46, -5.10], az: 0.18, pol: 1.48, dist: 2.80,
-    cage: { az: [-0.48, 0.90], pol: [1.18, 1.70], dist: [2.20, 3.50] },
+    target: [2.16, 1.34, -5.12], az: 0.16, pol: 1.50, dist: 2.55,
+    cage: { az: [-0.46, 0.92], pol: [1.18, 1.70], dist: [2.05, 3.30] },
     label: 'Still building',
   },
 };
@@ -61,7 +61,10 @@ export const STATION_ORDER = ['home', 'car', 'bay', 'bench', 'wall', 'dog', 'bik
    failure than punching through one. */
 const M = 0.34;
 function clampToRoom(v) {
-  if (v.z > Z_DOOR - 0.24) {
+  /* You can only be on the driveway if you are below the door header.
+     Otherwise the camera ends up inside the wall above the opening,
+     which renders as a black frame and reads as a broken site. */
+  if (v.z > Z_DOOR - 0.24 && v.y < DOOR_H - 0.12) {
     // standing on the driveway: the walls no longer apply, but stay in
     // front of the opening so the view is never blocked by the jambs
     v.x = THREE.MathUtils.clamp(v.x, -3.2, 3.2);
@@ -76,17 +79,27 @@ function clampToRoom(v) {
 }
 
 export class Rig {
-  constructor(camera) {
+  constructor(camera, opts = {}) {
     this.cam = camera;
+    /* Portrait viewports see a narrower slice of the world, so every
+       station backs off until its subject fits. One experience, not a
+       mobile subsite. */
+    this.pull = opts.pull || 1;
     this.target = new THREE.Vector3(...POI.home.target);
     this.tTarget = this.target.clone();
-    this.az = POI.home.az; this.pol = POI.home.pol; this.dist = POI.home.dist;
+    this.az = POI.home.az; this.pol = POI.home.pol; this.dist = POI.home.dist * this.pull;
     this.tAz = this.az; this.tPol = this.pol; this.tDist = this.dist;
-    this.cage = POI.home.cage;
+    this.cage = this.cageOf('home');
     this.locked = false;
     this.flight = null;
     this.station = 'home';
     this._v = new THREE.Vector3();
+  }
+
+  cageOf(name) {
+    const c = POI[name].cage;
+    if (this.pull === 1) return c;
+    return { az: c.az, pol: c.pol, dist: [c.dist[0] * this.pull, c.dist[1] * this.pull], rotate: c.rotate };
   }
 
   orbit(dx, dy) {
@@ -119,7 +132,7 @@ export class Rig {
         const e = easeInOut(k);
         this.tAz = from.az + dAz * e;
         this.tPol = from.pol + (p.pol - from.pol) * e;
-        this.tDist = from.dist + (p.dist - from.dist) * e;
+        this.tDist = from.dist + (p.dist * this.pull - from.dist) * e;
         this.tTarget.lerpVectors(from.t, this._v.set(...p.target), e);
       },
     };
@@ -133,10 +146,10 @@ export class Rig {
     this.flight = null;
     this.locked = false;
     this.station = name;
-    this.cage = p.cage;
+    this.cage = this.cageOf(name);
     this.tAz = this.az = p.az;
     this.tPol = this.pol = p.pol;
-    this.tDist = this.dist = p.dist;
+    this.tDist = this.dist = p.dist * this.pull;
     this.tTarget.set(...p.target);
     this.target.copy(this.tTarget);
     this.apply(1);
@@ -149,7 +162,7 @@ export class Rig {
       const k = Math.min(1, (now - f.t0) / f.ms);
       f.apply(k);
       if (k >= 1) {
-        this.cage = f.to.cage;
+        this.cage = this.cageOf(this.station);
         this.locked = false;
         const cb = f.onArrive;
         this.flight = null;

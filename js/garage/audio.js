@@ -9,10 +9,18 @@ export class Shop {
   }
 
   enable() {
-    if (this.ctx) { this.ctx.resume(); this.on = true; if (this.master) this.master.gain.value = 1; return; }
+    if (this.ctx) {
+      if (this.ctx.state !== 'running') this.ctx.resume();
+      this.on = true;
+      if (this.master) this.master.gain.value = 1;
+      return;
+    }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
+    // Safari and Chrome both hand back a suspended context when the
+    // gesture is not trusted; resuming here costs nothing when it is.
+    if (this.ctx.state !== 'running') this.ctx.resume();
     this.master = this.ctx.createGain();
     this.master.gain.value = 1;
     this.master.connect(this.ctx.destination);
