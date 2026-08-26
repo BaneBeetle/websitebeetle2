@@ -39,8 +39,8 @@ export const POI = {
     label: 'Research wall',
   },
   dog: {
-    target: [-2.26, 0.40, -4.30], az: 1.00, pol: 1.44, dist: 1.22,
-    cage: { az: [0.14, 1.72], pol: [1.18, 1.60], dist: [0.98, 1.95] },
+    target: [-2.42, 0.68, -4.66], az: 0.80, pol: 1.40, dist: 2.28,
+    cage: { az: [0.20, 1.52], pol: [1.16, 1.56], dist: [1.70, 2.80] },
     label: 'Iron Bark',
   },
   bike: {

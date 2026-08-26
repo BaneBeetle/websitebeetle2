@@ -227,6 +227,38 @@ export function doorTexture() {
   return toTexture(c);
 }
 
+/* Carbon weave. The Karbonius airbox is the one part of the bay a car
+   person will look straight at, and flat black plastic will not pass. */
+export function carbonTexture(scale = 30, repeat = 18) {
+  const S = 512;
+  const { c, x, w, h } = canvas(S, S);
+  x.fillStyle = '#0e1014'; x.fillRect(0, 0, w, h);
+  const cell = S / scale;
+  for (let iy = 0; iy < scale; iy++) {
+    for (let ix = 0; ix < scale; ix++) {
+      const over = (ix + iy) % 2 === 0;
+      const px = ix * cell, py = iy * cell;
+      const g = over
+        ? x.createLinearGradient(px, py, px + cell, py)
+        : x.createLinearGradient(px, py, px, py + cell);
+      g.addColorStop(0, '#0d0f13');
+      g.addColorStop(0.45, '#191d23');
+      g.addColorStop(0.55, '#1c2027');
+      g.addColorStop(1, '#0d0f13');
+      x.fillStyle = g;
+      x.fillRect(px, py, cell, cell);
+    }
+  }
+  // clearcoat sheen across the weave
+  const s2 = x.createLinearGradient(0, 0, w, h);
+  s2.addColorStop(0, 'rgba(255,255,255,0.10)');
+  s2.addColorStop(0.45, 'rgba(255,255,255,0.015)');
+  s2.addColorStop(1, 'rgba(255,255,255,0.09)');
+  x.fillStyle = s2; x.fillRect(0, 0, w, h);
+  const t = toTexture(c, { repeat: [repeat, repeat], aniso: 8 });
+  return t;
+}
+
 /* radial falloff used for blob shadows and light pools on props */
 export function blobTexture(soft = 0.55) {
   const { c, x, w, h } = canvas(256, 256);

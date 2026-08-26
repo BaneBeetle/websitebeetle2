@@ -186,7 +186,13 @@ async function start() {
   let hoodT = 0, hoodTarget = 0;
   let lampsOn = false, lampT = 0;
   let nightMode = false;
-  let headTargetX = 0, headTargetY = 0;
+  const pointerNdc = new THREE.Vector2(0, 0);
+  const lookRay = new THREE.Raycaster();
+  const lookPlane = new THREE.Plane();
+  const lookAt = new THREE.Vector3();
+  const headWorld = new THREE.Vector3();
+  const viewDir = new THREE.Vector3();
+  let boardT = 0, boardPhase = -1, boardLit = false;
 
   const lockButtons = (ms) => {
     buttonsLocked = true;
@@ -449,7 +455,7 @@ async function start() {
   canvas.addEventListener('pointermove', (e) => {
     ndc.x = (e.clientX / innerWidth) * 2 - 1;
     ndc.y = -(e.clientY / innerHeight) * 2 + 1;
-    headTargetX = ndc.x; headTargetY = ndc.y;
+    pointerNdc.copy(ndc);
     if (!down) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 6) dragging = true;
@@ -625,13 +631,43 @@ async function start() {
       dressing.motorLed.material.color.setRGB(0.56, 1, 0.69);
     }
 
-    // Iron Bark: one behavior, the head turns to the pointer
-    const yaw = THREE.MathUtils.clamp(headTargetX * 0.7, -0.55, 0.55);
-    const pitchTgt = THREE.MathUtils.clamp(-headTargetY * 0.35, -0.28, 0.30);
-    dog.head.rotation.y += (yaw - dog.head.rotation.y) * (1 - Math.pow(0.02, dt));
-    dog.head.rotation.x += (pitchTgt - dog.head.rotation.x) * (1 - Math.pow(0.02, dt));
+    /* Iron Bark watches the cursor. The pointer is cast onto a plane
+       through the head that faces the camera, so the head tracks the
+       actual point under the cursor from any angle rather than guessing
+       from screen coordinates. */
+    dog.head.getWorldPosition(headWorld);
+    camera.getWorldDirection(viewDir);
+    lookPlane.setFromNormalAndCoplanarPoint(viewDir.negate(), headWorld);
+    lookRay.setFromCamera(pointerNdc, camera);
+    let yaw = 0, pitchTgt = 0;
+    if (lookRay.ray.intersectPlane(lookPlane, lookAt)) {
+      dog.group.worldToLocal(lookAt);
+      const hx = lookAt.x - dog.head.position.x;
+      const hy = lookAt.y - dog.head.position.y;
+      const hz = lookAt.z - dog.head.position.z;
+      // clamped so it never cranes past what a neck could do
+      yaw = THREE.MathUtils.clamp(Math.atan2(hx, Math.max(0.12, hz)), -0.72, 0.72);
+      pitchTgt = THREE.MathUtils.clamp(-Math.atan2(hy, Math.hypot(hx, hz)), -0.34, 0.30);
+    }
+    const track = reduced ? 1 : 1 - Math.pow(0.02, dt);
+    dog.head.rotation.y += (yaw - dog.head.rotation.y) * track;
+    dog.head.rotation.x += (pitchTgt - dog.head.rotation.x) * track;
     const blink = Math.sin(clock.t * 0.9) > 0.985 ? 0.15 : 1;
     dog.eyeMat.color.setRGB(0.56 * blink, 0.75 * blink, 1 * blink);
+
+    /* the behavior board cycles the state machine, active state blinking */
+    if (tier >= 2) {
+      boardT += dt;
+      const litNow = (boardT % 0.86) < 0.56;
+      const phaseNow = Math.floor(boardT / 2.4) % 4;
+      if (litNow !== boardLit || phaseNow !== boardPhase) {
+        boardLit = litNow; boardPhase = phaseNow;
+        S.drawBehavior(dog.board.canvas, boardPhase, boardLit);
+        dog.board.texture.needsUpdate = true;
+      }
+      dog.dockLed.material.color.setRGB(
+        boardLit ? 0.62 : 0.24, boardLit ? 0.75 : 0.32, boardLit ? 1 : 0.48);
+    }
 
     rig.update(dt, now);
     renderer.render(scene, camera);

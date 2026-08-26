@@ -14,7 +14,11 @@ import { blobShadow } from './scene.js';
 /* Local model space is Z-up with the nose at -Y; the glTF root carries
    the Z-up to Y-up matrix, so these planes are expressed in that local
    frame and the hood group inherits the same transform. */
-const HOOD = { yBack: -1.20, yFront: -2.30, xHalf: 0.780, zAtBack: 0.86, slope: 0.228 };
+/* The cut planes hug the hood skin closely. An earlier version sat 0.13
+   below it, which scooped the fender tops and the headlight surrounds
+   into the hood: they flew away when it opened and left holes you could
+   see the bay through. Keep the floor plane within ~0.05 of the skin. */
+const HOOD = { yBack: -1.20, yFront: -2.215, xHalf: 0.735, zAtBack: 0.930, slope: 0.220 };
 export const HOOD_OPEN = -0.80;
 
 const PAINT = 0x27427f;          // Interlagos Blue
@@ -117,18 +121,29 @@ export async function loadCar(scene, onProgress) {
   under.frustumCulled = false;
   hinge.add(under);
 
+  const pad = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.24, 0.86),
+    new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.96, metalness: 0.02 })
+  );
+  pad.position.set(0, -1.80 - HOOD.yBack, 0.845 - HINGE_Z);
+  pad.rotation.x = Math.PI + 0.20;
+  hinge.add(pad);
+
   const dyno = dynoSheet();
-  dyno.position.set(0.30, -1.66 - HOOD.yBack, 0.895 - HINGE_Z);
-  dyno.rotation.set(Math.PI + 0.34, 0, 0.05);
+  dyno.position.set(0.25, -1.70 - HOOD.yBack, 0.892 - HINGE_Z);
+  dyno.rotation.set(Math.PI + 0.11, 0, 0.045);
   hinge.add(dyno);
 
-  /* prop rod, because a hood that floats reads as a bug */
-  const rod = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.012, 0.012, 0.74, 6),
-    new THREE.MeshStandardMaterial({ color: 0x8b939d, metalness: 0.9, roughness: 0.35 })
-  );
-  rod.position.set(-0.52, -1.52, 0.62);
-  rod.rotation.set(0.30, 0, 0.16);
+  /* Two gas struts, the way the real car holds its hood up. A hood that
+     floats on nothing reads as a bug. */
+  const rod = new THREE.Group();
+  const strutMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, metalness: 0.88, roughness: 0.36 });
+  for (const sx of [-1, 1]) {
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.014, 0.80, 8), strutMat);
+    strut.position.set(sx * 0.60, -1.52, 0.68);
+    strut.rotation.set(0.62, 0, sx * 0.10);
+    rod.add(strut);
+  }
   rod.visible = false;
   body.parent.add(rod);
 
@@ -187,181 +202,200 @@ function buildBay() {
   g.name = 'engine-bay';
   const hotspots = [];
 
-  /* Local frame: +Z is up, -Y is the nose, +X is the passenger side.
-     PlaneGeometry faces +Z, so rotation.x = PI/2 faces the nose and
-     rotation.y = PI/2 faces +X. Every placement below follows that. */
-  const FLOOR_Z = 0.30, TOP_Z = 0.80;
-  const Y_BULK = -1.17, Y_NOSE = -2.24, X_SIDE = 0.685;
+  /* Local frame: +Z is up, -Y is the nose, +X is the driver's side of a
+     left-hand-drive car, which is the side the airbox lives on. Layout
+     follows the real bay: black canister and tanks on the passenger
+     side, ribbed cam cover down the middle, throttle bodies and the
+     carbon plenum beside it, the Karbonius box and its snorkel on the
+     driver's side. Almost all of it is black; the metal is an accent. */
+  const FLOOR_Z = 0.28, TOP_Z = 0.76;
+  const Y_BULK = -1.21, Y_NOSE = -2.13, X_SIDE = 0.655;
 
-  const steel = new THREE.MeshStandardMaterial({ color: 0x4c545f, metalness: 0.85, roughness: 0.42 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1c2029, metalness: 0.3, roughness: 0.78 });
-  const carbon = new THREE.MeshStandardMaterial({ color: CARBON, metalness: 0.45, roughness: 0.28, envMapIntensity: 1.4 });
-  const alu = new THREE.MeshStandardMaterial({ color: 0x9aa4b0, metalness: 0.95, roughness: 0.28 });
-  const rubber = new THREE.MeshStandardMaterial({ color: 0x121519, roughness: 0.95 });
-  const liner = new THREE.MeshStandardMaterial({ color: 0x0b0e13, roughness: 0.95, metalness: 0.15, side: THREE.FrontSide });
+  const carbonMap = P.carbonTexture(30, 22);
+  const carbon = new THREE.MeshStandardMaterial({
+    map: carbonMap, roughness: 0.22, metalness: 0.35, envMapIntensity: 1.7,
+  });
+  const carbonDull = new THREE.MeshStandardMaterial({
+    map: carbonMap, roughness: 0.42, metalness: 0.25, envMapIntensity: 1.1,
+  });
+  const engineBlack = new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.58, metalness: 0.35 });
+  const plasticBlack = new THREE.MeshStandardMaterial({ color: 0x101317, roughness: 0.74, metalness: 0.12 });
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.94, metalness: 0.02 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x3b424c, roughness: 0.48, metalness: 0.8 });
+  const alu = new THREE.MeshStandardMaterial({ color: 0x8d96a2, roughness: 0.38, metalness: 0.9 });
+  const liner = new THREE.MeshStandardMaterial({ color: 0x07090c, roughness: 0.95, metalness: 0.1, side: THREE.FrontSide });
+  const translucent = new THREE.MeshStandardMaterial({
+    color: 0xb9bfc6, roughness: 0.35, metalness: 0.02, transparent: true, opacity: 0.55,
+  });
 
-  const plane = (w, h, pos, rot) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), liner);
+  const box = (w, d, hgt, pos, mat, rot) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, d, hgt), mat);
+    m.position.set(pos[0], pos[1], pos[2]);
+    if (rot) m.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
+    g.add(m); return m;
+  };
+  const drum = (r, hgt, pos, mat) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, hgt, 18), mat);
+    m.rotation.x = Math.PI / 2;
+    m.position.set(pos[0], pos[1], pos[2]);
+    g.add(m); return m;
+  };
+  const plane = (w, hgt, pos, rot, mat) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hgt), mat || liner);
     m.position.set(pos[0], pos[1], pos[2]);
     m.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
     g.add(m); return m;
   };
 
-  /* liner: closes the cavity so the cut edge never shows through */
+  /* ---- liner: closes the cavity, inward-facing only ---------------- */
   const bayLen = Y_BULK - Y_NOSE;
-  plane(X_SIDE * 2, bayLen, [0, (Y_BULK + Y_NOSE) / 2, FLOOR_Z], [0, 0, 0]);                    // floor
-  plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_BULK, (TOP_Z + FLOOR_Z) / 2], [Math.PI / 2, 0, 0]);  // bulkhead
-  plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_NOSE, (TOP_Z + FLOOR_Z) / 2], [-Math.PI / 2, 0, 0]); // nose panel
-  /* Inner fenders stay inboard of the shut line by a clear margin. They
-     cannot poke through the bodywork from any angle the cage allows, and
-     the small gap they leave at the top shows the inside of the fender
-     skin, which is what you would actually see. */
+  const midY = (Y_BULK + Y_NOSE) / 2, midZ = (TOP_Z + FLOOR_Z) / 2;
+  plane(X_SIDE * 2, bayLen, [0, midY, FLOOR_Z], [0, 0, 0]);
+  plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_BULK, midZ], [Math.PI / 2, 0, 0]);
+  plane(X_SIDE * 2, TOP_Z - FLOOR_Z, [0, Y_NOSE, midZ], [-Math.PI / 2, 0, 0]);
   for (const sx of [-1, 1]) {
-    plane(TOP_Z - FLOOR_Z, bayLen, [sx * X_SIDE, (Y_BULK + Y_NOSE) / 2, (TOP_Z + FLOOR_Z) / 2],
-          [0, -sx * Math.PI / 2, 0]);
-    const lip = new THREE.Mesh(new THREE.PlaneGeometry(0.09, bayLen), liner);
-    lip.position.set(sx * (X_SIDE - 0.045), (Y_BULK + Y_NOSE) / 2, TOP_Z);
+    plane(TOP_Z - FLOOR_Z, bayLen, [sx * X_SIDE, midY, midZ], [0, -sx * Math.PI / 2, 0]);
+    const lip = new THREE.Mesh(new THREE.PlaneGeometry(0.07, bayLen), liner);
+    lip.position.set(sx * (X_SIDE - 0.035), midY, TOP_Z);
     g.add(lip);
   }
 
-  /* strut towers at the bulkhead corners */
+  /* ---- strut towers and the brace across them --------------------- */
   for (const sx of [-1, 1]) {
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.20, TOP_Z - FLOOR_Z - 0.06, 12), steel);
-    tower.rotation.x = Math.PI / 2;
-    tower.position.set(sx * 0.60, -1.44, FLOOR_Z + (TOP_Z - FLOOR_Z - 0.06) / 2);
-    g.add(tower);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.070, 0.070, 0.045, 12), alu);
-    cap.rotation.x = Math.PI / 2;
-    cap.position.set(sx * 0.60, -1.44, TOP_Z - 0.025);
-    g.add(cap);
+    const tower = drum(0.145, TOP_Z - FLOOR_Z - 0.16, [sx * 0.50, -1.37, FLOOR_Z + (TOP_Z - FLOOR_Z - 0.16) / 2], plasticBlack);
+    tower.name = 'tower';
+    const cap = drum(0.088, 0.05, [sx * 0.50, -1.37, TOP_Z - 0.19], steel);
+    cap.name = 'cap';
     for (let n = 0; n < 3; n++) {
-      const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 6), steel);
-      nut.rotation.x = Math.PI / 2;
-      nut.position.set(sx * 0.60 + Math.cos(n * 2.09) * 0.115, -1.44 + Math.sin(n * 2.09) * 0.115, TOP_Z - 0.012);
-      g.add(nut);
+      const a = n * 2.094 + 0.4;
+      drum(0.017, 0.030, [sx * 0.50 + Math.cos(a) * 0.105, -1.37 + Math.sin(a) * 0.105, TOP_Z - 0.185], steel);
     }
   }
-  /* strut brace: one clean line across the mess */
-  const brace = new THREE.Mesh(new THREE.BoxGeometry(1.20, 0.055, 0.035), alu);
-  brace.position.set(0, -1.44, TOP_Z - 0.005);
-  g.add(brace);
+  // a slim flat bar, not a scaffold pole
+  box(1.06, 0.042, 0.020, [0, -1.37, TOP_Z - 0.145], plasticBlack);
+  for (const sx of [-1, 1]) box(0.075, 0.075, 0.024, [sx * 0.50, -1.37, TOP_Z - 0.147], plasticBlack);
 
-  /* block plus ribbed cam cover, running fore and aft */
-  const block = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.00, 0.30), dark);
-  block.position.set(-0.06, -1.82, FLOOR_Z + 0.15);
-  g.add(block);
-  const cam = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.94, 0.13), new THREE.MeshStandardMaterial({
-    color: 0x333a44, metalness: 0.7, roughness: 0.40,
-  }));
-  cam.position.set(-0.19, -1.82, FLOOR_Z + 0.36);
-  g.add(cam);
-  for (let i = 0; i < 13; i++) {
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.022, 0.018), alu);
-    rib.position.set(-0.19, -1.43 - i * 0.066, FLOOR_Z + 0.428);
-    g.add(rib);
+  /* ---- cam cover down the middle ---------------------------------- */
+  const block = box(0.56, 0.84, 0.24, [-0.02, -1.72, FLOOR_Z + 0.12], plasticBlack);
+  block.name = 'block';
+  const cam = box(0.28, 0.80, 0.115, [-0.14, -1.72, FLOOR_Z + 0.295], engineBlack);
+  cam.name = 'cam-cover';
+  for (let i = 0; i < 15; i++) {
+    box(0.245, 0.024, 0.016, [-0.14, -1.36 - i * 0.052, FLOOR_Z + 0.354], engineBlack);
   }
-
-  /* plenum plus six velocity stacks: the S54 signature */
-  const plenum = new THREE.Mesh(new THREE.CapsuleGeometry(0.105, 0.78, 4, 14), new THREE.MeshStandardMaterial({
-    color: 0x39414c, metalness: 0.82, roughness: 0.32,
-  }));
-  plenum.position.set(0.26, -1.82, FLOOR_Z + 0.20);
-  g.add(plenum);
+  // the M colours, as a painted accent rather than a badge
+  [0x3f7fbe, 0x1b3268, 0x9c2b33].forEach((hex, i) => {
+    box(0.022, 0.052, 0.003, [-0.196 + i * 0.024, -2.075, FLOOR_Z + 0.3555],
+      new THREE.MeshStandardMaterial({ color: hex, roughness: 0.55, metalness: 0.05 }));
+  });
+  // coil packs sitting in a row along the cover
   for (let i = 0; i < 6; i++) {
-    const y = -1.50 - i * 0.128;
-    const runner = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.050, 0.26, 12), alu);
-    runner.rotation.x = Math.PI / 2;
-    runner.position.set(0.26, y, FLOOR_Z + 0.32);
-    g.add(runner);
-    const trumpet = new THREE.Mesh(new THREE.TorusGeometry(0.048, 0.013, 6, 16), alu);
-    trumpet.position.set(0.26, y, FLOOR_Z + 0.448);
-    g.add(trumpet);
+    box(0.055, 0.055, 0.045, [0.015, -1.42 - i * 0.126, FLOOR_Z + 0.33], plasticBlack);
   }
-  hotspots.push({ id: 'spec-engine', at: new THREE.Vector3(0.26, -1.82, FLOOR_Z + 0.46), r: 0.30 });
 
-  /* Karbonius CSL airbox, feeding the plenum from the nose side */
-  const airbox = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.40, 0.30), carbon);
-  airbox.position.set(0.32, -2.10, FLOOR_Z + 0.19);
-  g.add(airbox);
-  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.42, 0.028), new THREE.MeshStandardMaterial({
-    color: 0x262b33, metalness: 0.55, roughness: 0.20, envMapIntensity: 1.8,
-  }));
-  lid.position.set(0.32, -2.10, FLOOR_Z + 0.35);
-  g.add(lid);
-  const snorkel = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.30, 12), dark);
-  snorkel.rotation.z = Math.PI / 2;
-  snorkel.position.set(0.32, -1.92, FLOOR_Z + 0.22);
-  snorkel.rotation.x = Math.PI / 2;
-  snorkel.rotation.z = 0;
+  /* ---- throttle bodies and the carbon plenum ----------------------- */
+  const casting = new THREE.MeshStandardMaterial({ color: 0x4a5158, roughness: 0.55, metalness: 0.7 });
+  for (let i = 0; i < 6; i++) {
+    const y = -1.44 - i * 0.126;
+    drum(0.036, 0.085, [0.16, y, FLOOR_Z + 0.235], casting);
+    drum(0.020, 0.045, [0.16, y, FLOOR_Z + 0.295], plasticBlack);
+  }
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.010, 0.72, 8), casting);
+  rail.position.set(0.205, -1.72, FLOOR_Z + 0.285);
+  g.add(rail);
+
+  const plenum = new THREE.Mesh(new THREE.CapsuleGeometry(0.108, 0.70, 5, 18), carbon);
+  plenum.position.set(0.285, -1.72, FLOOR_Z + 0.275);
+  plenum.name = 'plenum';
+  g.add(plenum);
+  hotspots.push({ id: 'spec-engine', at: new THREE.Vector3(0.10, -1.72, FLOOR_Z + 0.38), r: 0.30 });
+
+  /* ---- Karbonius airbox and its snorkel ---------------------------- */
+  const airbox = box(0.30, 0.42, 0.34, [0.515, -1.44, FLOOR_Z + 0.18], carbon);
+  airbox.name = 'airbox';
+  box(0.318, 0.438, 0.022, [0.515, -1.44, FLOOR_Z + 0.362], carbonDull);
+  // the snorkel: out of the box, forward and inboard, mouth facing the nose
+  const path = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0.515, -1.65, FLOOR_Z + 0.20),
+    new THREE.Vector3(0.512, -1.80, FLOOR_Z + 0.185),
+    new THREE.Vector3(0.495, -1.94, FLOOR_Z + 0.155),
+    new THREE.Vector3(0.470, -2.05, FLOOR_Z + 0.125),
+  ]);
+  const snorkel = new THREE.Mesh(new THREE.TubeGeometry(path, 30, 0.088, 18, false), carbon);
+  snorkel.name = 'snorkel';
   g.add(snorkel);
-  hotspots.push({ id: 'spec-intake', at: new THREE.Vector3(0.32, -2.10, FLOOR_Z + 0.38), r: 0.30 });
+  // flared mouth
+  const mouth = new THREE.Mesh(new THREE.CylinderGeometry(0.112, 0.090, 0.060, 20, 1, true), carbonDull);
+  mouth.rotation.x = Math.PI / 2 - 0.24;
+  mouth.position.set(0.464, -2.083, FLOOR_Z + 0.113);
+  g.add(mouth);
+  const throat = new THREE.Mesh(new THREE.CircleGeometry(0.088, 20), rubber);
+  throat.rotation.x = -0.24;
+  throat.position.set(0.464, -2.095, FLOOR_Z + 0.116);
+  g.add(throat);
+  // clamp band where the snorkel meets the box, and the marker on it
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.094, 0.094, 0.050, 20), plasticBlack);
+  band.rotation.x = Math.PI / 2 - 0.09;
+  band.position.set(0.513, -1.735, FLOOR_Z + 0.193);
+  g.add(band);
+  hotspots.push({ id: 'spec-intake', at: new THREE.Vector3(0.51, -1.60, FLOOR_Z + 0.36), r: 0.30 });
 
-  /* ECU box bolted to the left tower: where the tune lives */
-  const ecu = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.32, 0.10), new THREE.MeshStandardMaterial({
-    color: 0x232830, metalness: 0.55, roughness: 0.4,
+  /* ---- passenger side: filter drum, tanks, ECU box ---------------- */
+  const canister = drum(0.155, 0.24, [-0.46, -1.50, FLOOR_Z + 0.15], plasticBlack);
+  canister.name = 'canister';
+  drum(0.115, 0.05, [-0.46, -1.50, FLOOR_Z + 0.29], plasticBlack);
+  drum(0.098, 0.19, [-0.47, -1.84, FLOOR_Z + 0.12], plasticBlack);
+  // coolant expansion tank, forward on the passenger side
+  box(0.17, 0.19, 0.17, [-0.46, -2.00, FLOOR_Z + 0.10], translucent);
+  drum(0.036, 0.035, [-0.46, -2.00, FLOOR_Z + 0.20], new THREE.MeshStandardMaterial({
+    color: 0x2c3038, roughness: 0.6,
   }));
-  ecu.position.set(-0.54, -1.70, FLOOR_Z + 0.14);
-  g.add(ecu);
-  const ecuFace = new THREE.Mesh(new THREE.PlaneGeometry(0.23, 0.29), new THREE.MeshBasicMaterial({
+  // brake reservoir at the bulkhead
+  box(0.13, 0.10, 0.13, [-0.24, -1.29, FLOOR_Z + 0.12], translucent);
+
+  const ecu = box(0.20, 0.26, 0.085, [-0.50, -1.26, FLOOR_Z + 0.06], plasticBlack);
+  ecu.name = 'ecu';
+  const ecuFace = new THREE.Mesh(new THREE.PlaneGeometry(0.175, 0.225), new THREE.MeshBasicMaterial({
     map: ecuLabel(), transparent: true,
   }));
-  ecuFace.position.set(-0.54, -1.70, FLOOR_Z + 0.192);
+  ecuFace.position.set(-0.50, -1.26, FLOOR_Z + 0.104);
   g.add(ecuFace);
-  hotspots.push({ id: 'spec-tune', at: new THREE.Vector3(-0.54, -1.70, FLOOR_Z + 0.20), r: 0.26 });
+  hotspots.push({ id: 'spec-tune', at: new THREE.Vector3(-0.50, -1.26, FLOOR_Z + 0.14), r: 0.24 });
 
-  /* braided lines and hoses */
-  const tube = (pts, r, mat) => {
-    const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)));
-    g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 26, r, 6, false), mat));
-  };
-  const braid = new THREE.MeshStandardMaterial({ color: 0x848d9b, metalness: 0.9, roughness: 0.44 });
-  tube([[-0.60, -1.52, FLOOR_Z + 0.30], [-0.36, -1.62, FLOOR_Z + 0.26], [-0.02, -1.94, FLOOR_Z + 0.22], [0.22, -2.16, FLOOR_Z + 0.16]], 0.016, braid);
-  tube([[0.60, -1.48, FLOOR_Z + 0.26], [0.52, -1.78, FLOOR_Z + 0.14], [0.24, -2.02, FLOOR_Z + 0.10], [-0.26, -2.20, FLOOR_Z + 0.10]], 0.021, rubber);
-  tube([[-0.68, -2.04, FLOOR_Z + 0.08], [-0.20, -2.10, FLOOR_Z + 0.06], [0.30, -2.18, FLOOR_Z + 0.06]], 0.025, rubber);
-  tube([[-0.62, -1.44, FLOOR_Z + 0.34], [-0.30, -1.40, FLOOR_Z + 0.30], [0.10, -1.42, FLOOR_Z + 0.28]], 0.013, braid);
+  /* ---- cowl, slam panel, hoses ------------------------------------ */
+  box(1.24, 0.05, 0.030, [0, -1.245, TOP_Z - 0.075], alu);      // cowl brace
+  box(1.28, 0.055, 0.055, [0, -1.215, TOP_Z - 0.135], rubber);  // bulkhead seal
+  box(1.20, 0.10, 0.05, [0, -2.10, FLOOR_Z + 0.32], plasticBlack); // slam panel
 
-  /* radiator core at the nose */
-  const rad = new THREE.Mesh(new THREE.BoxGeometry(1.30, 0.05, 0.30), new THREE.MeshStandardMaterial({
-    color: 0x2c333c, metalness: 0.7, roughness: 0.6,
-  }));
-  rad.position.set(0, -2.26, FLOOR_Z + 0.16);
-  g.add(rad);
-  for (let i = 0; i < 15; i++) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.07, 0.29), dark);
-    fin.position.set(-0.60 + i * 0.086, -2.26, FLOOR_Z + 0.16);
-    g.add(fin);
+  const rad = box(1.22, 0.05, 0.26, [0, -2.115, FLOOR_Z + 0.13], plasticBlack);
+  rad.name = 'radiator';
+  for (let i = 0; i < 13; i++) {
+    box(0.05, 0.06, 0.25, [-0.55 + i * 0.092, -2.115, FLOOR_Z + 0.13], rubber);
   }
 
-  /* brake booster and reservoir on the bulkhead, so the back of the bay
-     reads as a firewall rather than a black rectangle */
-  const booster = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.16, 16), steel);
-  booster.rotation.x = Math.PI / 2;
-  booster.rotation.z = Math.PI / 2;
-  booster.rotation.set(0, Math.PI / 2, 0);
-  booster.position.set(-0.30, -1.28, FLOOR_Z + 0.22);
-  g.add(booster);
-  const resv = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.13), new THREE.MeshStandardMaterial({
-    color: 0xd8dbe0, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.85,
-  }));
-  resv.position.set(-0.30, -1.28, FLOOR_Z + 0.36);
-  g.add(resv);
-  const fuse = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.10), dark);
-  fuse.position.set(0.52, -1.30, FLOOR_Z + 0.16);
-  g.add(fuse);
+  const tube = (pts, r, mat) => {
+    const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)));
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 22, r, 8, false), mat));
+  };
+  tube([[-0.34, -1.30, FLOOR_Z + 0.20], [-0.30, -1.55, FLOOR_Z + 0.24], [-0.20, -1.80, FLOOR_Z + 0.22]], 0.017, rubber);
+  tube([[0.30, -1.32, FLOOR_Z + 0.24], [0.20, -1.30, FLOOR_Z + 0.22], [-0.05, -1.28, FLOOR_Z + 0.22]], 0.014, rubber);
+  tube([[-0.52, -1.96, FLOOR_Z + 0.06], [-0.20, -2.02, FLOOR_Z + 0.05], [0.24, -2.06, FLOOR_Z + 0.05]], 0.022, rubber);
+  tube([[0.44, -1.34, FLOOR_Z + 0.26], [0.30, -1.30, FLOOR_Z + 0.26], [0.10, -1.30, FLOOR_Z + 0.24]], 0.012,
+    new THREE.MeshStandardMaterial({ color: 0x6f7885, roughness: 0.45, metalness: 0.85 }));
 
-  /* a work light clipped to the brace: a garage truth that also solves
-     the problem of lighting a cavity with no shadow maps */
-  const bulb = new THREE.PointLight(0xdce7ff, 1.25, 1.15, 2.6);
-  bulb.position.set(0.02, -1.80, TOP_Z - 0.02);
+  /* ---- the work light clipped to the brace ------------------------ */
+  const bulb = new THREE.PointLight(0xdbe6ff, 1.30, 1.45, 2.4);
+  bulb.position.set(0.02, -1.74, TOP_Z - 0.06);
   g.add(bulb);
-  const bulbBody = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.10, 10), steel);
-  bulbBody.rotation.x = Math.PI / 2;
-  bulbBody.position.set(-0.34, -1.44, TOP_Z + 0.02);
-  g.add(bulbBody);
-  const bulbLens = new THREE.Mesh(new THREE.CircleGeometry(0.035, 12), new THREE.MeshBasicMaterial({ color: 0xf0f5ff }));
-  bulbLens.rotation.x = Math.PI;
-  bulbLens.position.set(-0.34, -1.44, TOP_Z - 0.031);
-  g.add(bulbLens);
+  const fill = new THREE.PointLight(0x93a8c8, 0.55, 1.9, 2.0);
+  fill.position.set(0.05, -1.98, TOP_Z + 0.12);
+  g.add(fill);
+  const lampBody = drum(0.036, 0.09, [-0.30, -1.36, TOP_Z - 0.10], steel);
+  lampBody.name = 'lamp';
+  const lampLens = new THREE.Mesh(new THREE.CircleGeometry(0.034, 14), new THREE.MeshBasicMaterial({ color: 0xeef4ff }));
+  lampLens.rotation.x = Math.PI;
+  lampLens.position.set(-0.30, -1.36, TOP_Z - 0.147);
+  g.add(lampLens);
 
   g.visible = false;
   return { group: g, hotspots, bulb };
@@ -427,7 +461,7 @@ function dynoSheet() {
   x.fillRect(-16, -10, 90, 34); x.fillRect(w - 74, -10, 90, 34);
 
   const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.40, 0.30),
+    new THREE.PlaneGeometry(0.50, 0.375),
     new THREE.MeshStandardMaterial({ map: P.toTexture(c), roughness: 0.94, side: THREE.DoubleSide })
   );
   return m;

@@ -188,6 +188,56 @@ export function touchSignTexture() {
   return P.toTexture(c);
 }
 
+/* Iron Bark's behavior board. The four states are the ones in the real
+   state machine, and the board redraws in place rather than swapping
+   between eight pre-rendered textures. */
+export const DOG_PHASES = ['IDLE', 'FOLLOW', 'SEARCH', 'EXPLORE'];
+
+export function behaviorCanvas() {
+  return P.canvas(768, 300);
+}
+
+export function drawBehavior(cv, phase, lit) {
+  const { x, w, h } = cv;
+  x.clearRect(0, 0, w, h);
+  x.fillStyle = '#0a0d12'; x.fillRect(0, 0, w, h);
+  x.strokeStyle = '#222932'; x.lineWidth = 4; x.strokeRect(8, 8, w - 16, h - 16);
+
+  P.line(x, 'IRON BARK', { font: P.fonts.mono, size: 30, weight: 700, color: P.INK, x: 40, y: 66, track: 3 });
+  P.line(x, '//', { font: P.fonts.mono, size: 30, weight: 400, color: P.BLUE, x: 232, y: 66, track: 2 });
+  P.line(x, 'behavior', { font: P.fonts.mono, size: 30, weight: 400, color: P.INK2, x: 286, y: 66, track: 1 });
+
+  const bw = 150, bh = 62, gap = 22, y0 = 110;
+  DOG_PHASES.forEach((name, i) => {
+    const px = 40 + i * (bw + gap);
+    const active = i === phase;
+    if (active && lit) {
+      x.fillStyle = '#10224a'; x.fillRect(px, y0, bw, bh);
+      x.strokeStyle = P.BLUE_LIT; x.lineWidth = 4;
+    } else if (active) {
+      x.fillStyle = '#0c1526'; x.fillRect(px, y0, bw, bh);
+      x.strokeStyle = P.BLUE; x.lineWidth = 3;
+    } else {
+      x.strokeStyle = '#2b323d'; x.lineWidth = 3;
+    }
+    x.strokeRect(px, y0, bw, bh);
+    P.line(x, name, {
+      font: P.fonts.mono, size: name.length > 6 ? 24 : 27,
+      weight: active ? 700 : 400,
+      color: active ? (lit ? '#ffffff' : P.INK2) : P.INK3,
+      x: px + bw / 2, y: y0 + 41, align: 'center', track: 2,
+    });
+    if (i < DOG_PHASES.length - 1) {
+      x.strokeStyle = '#2b323d'; x.lineWidth = 3;
+      x.beginPath(); x.moveTo(px + bw, y0 + bh / 2); x.lineTo(px + bw + gap, y0 + bh / 2); x.stroke();
+    }
+  });
+
+  P.line(x, 'YOLOv11 + ArcFace + VLM  //  Pi 5 + GPU', {
+    font: P.fonts.mono, size: 23, color: P.INK3, x: 40, y: 250, track: 1.5,
+  });
+}
+
 /* the exit sign over the back door */
 export function exitSignTexture() {
   const { c, x, w, h } = P.canvas(512, 160);

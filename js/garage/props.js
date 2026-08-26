@@ -479,8 +479,29 @@ export function buildDog(scene) {
   dogHit.position.set(0, 0.40, 0.02);
   g.add(dogHit);
 
+  /* The behavior board on the wall behind the dock. It reads out the
+     state machine the real robot runs, and the active state blinks. */
+  const boardCv = S.behaviorCanvas();
+  S.drawBehavior(boardCv, 0, true);
+  const boardTex = P.toTexture(boardCv.c, { aniso: 8 });
+  const board = new THREE.Group();
+  board.position.set(0.128, 1.10, -0.953);
+  board.rotation.y = -0.62;   // undo the dock's yaw so it faces the room
+  g.add(board);
+  const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.42, 0.035), new THREE.MeshStandardMaterial({
+    color: 0x2a3039, roughness: 0.62, metalness: 0.35,
+  }));
+  board.add(boardFrame);
+  const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(0.90, 0.35), new THREE.MeshBasicMaterial({ map: boardTex }));
+  boardFace.position.z = 0.019;
+  board.add(boardFace);
+  const boardGlow = new THREE.PointLight(0x7aa7ff, 0.7, 1.5, 2.2);
+  boardGlow.position.set(0.20, 1.02, -0.70);
+  g.add(boardGlow);
+
   return {
     group: g, head, eyeMat, dockLed,
+    board: { canvas: boardCv, texture: boardTex, group: board },
     hotspots: [{ id: 'dog', mesh: dogHit, size: [0.9, 0.9] }],
   };
 }
