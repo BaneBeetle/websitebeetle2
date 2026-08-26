@@ -93,7 +93,13 @@ export class Rig {
     this.locked = false;
     this.flight = null;
     this.station = 'home';
+    /* When the reading panel is open it covers the right third of a wide
+       viewport, so the whole rig slides sideways to keep the subject in
+       the part of the frame you can still see. */
+    this.shift = 0;
+    this._shift = 0;
     this._v = new THREE.Vector3();
+    this._right = new THREE.Vector3();
   }
 
   cageOf(name) {
@@ -187,6 +193,18 @@ export class Rig {
     );
     clampToRoom(this._v);
     this.cam.position.copy(this._v);
-    this.cam.lookAt(this.target);
+
+    /* Aim to the right of the subject so the subject lands on the left,
+       clear of the panel. Only the look-at point moves: translating the
+       eye as well would keep the framing and just show a different wall. */
+    this._shift += (this.shift - this._shift) * Math.min(1, k * 1.4);
+    if (Math.abs(this._shift) > 0.0015) {
+      this._right.set(Math.cos(this.az), 0, -Math.sin(this.az))
+        .multiplyScalar(this._shift * this.dist)
+        .add(this.target);
+      this.cam.lookAt(this._right);
+    } else {
+      this.cam.lookAt(this.target);
+    }
   }
 }

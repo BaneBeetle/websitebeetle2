@@ -66,6 +66,8 @@ async function start() {
   const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.05, 60);
   /* Portrait phones see a narrow slice, so every station steps back. */
   const pullFor = () => (innerWidth / innerHeight < 0.85 ? 1.42 : innerWidth < 900 ? 1.15 : 1);
+  // the panel is a right-hand rail above 760px and a bottom sheet below
+  const wideViewport = () => innerWidth > 760;
   const rig = new Rig(camera, { pull: pullFor() });
   /* Portrait sees a narrow slice, so the wide stations aim at the one
      thing worth seeing instead of the whole wall. */
@@ -89,6 +91,7 @@ async function start() {
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight, false);
     clearTimeout(resizeTimer);
+    if (!wideViewport()) rig.shift = 0;
     resizeTimer = setTimeout(() => {
       const p = pullFor();
       if (p === rig.pull) return;
@@ -374,6 +377,7 @@ async function start() {
     panel.scrollTop = 0;
     panel.setAttribute('aria-hidden', 'false');
     panel.inert = false;
+    rig.shift = wideViewport() ? 0.20 : 0;
   }
   function closePanel() {
     if (panel.contains(document.activeElement)) {
@@ -383,6 +387,7 @@ async function start() {
     panel.classList.remove('open');
     panel.setAttribute('aria-hidden', 'true');
     panel.inert = true;
+    rig.shift = 0;
   }
   panel.inert = true;
 
