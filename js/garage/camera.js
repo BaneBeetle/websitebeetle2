@@ -23,9 +23,12 @@ export const POI = {
     cage: { az: null, pol: [1.06, 1.48], dist: [3.20, 4.70] },
     label: 'Carbeetle',
   },
+  /* The bay is the one station you are meant to read rather than look at,
+     so it sits closer in than the rest: at 2.45 the boards on the engine
+     were legible but small, and half the frame was bodywork. */
   bay: {
-    target: [-0.30, 0.95, 1.28], az: 0.14, pol: 0.86, dist: 2.45,
-    cage: { az: [-0.50, 0.78], pol: [0.58, 1.26], dist: [1.95, 3.00] },
+    target: [-0.30, 0.95, 1.28], az: 0.14, pol: 0.86, dist: 2.05,
+    cage: { az: [-0.50, 0.78], pol: [0.58, 1.26], dist: [1.70, 2.80] },
     label: 'Engine bay',
   },
   bench: {

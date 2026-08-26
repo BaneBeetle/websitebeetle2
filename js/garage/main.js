@@ -192,6 +192,9 @@ async function start() {
   const lookAt = new THREE.Vector3();
   const headWorld = new THREE.Vector3();
   const viewDir = new THREE.Vector3();
+  const plateCam = new THREE.Vector3();
+  const plateAim = new THREE.Object3D();
+  plateAim.up.set(0, 0, 1);              // the bay's own up, which is Z
   let boardT = 0, boardPhase = -1, boardFlash = -1;
   let dogPerk = 0, dogHop = 0;
 
@@ -211,7 +214,17 @@ async function start() {
       shop.whoosh();
       rig.flyTo(name, 1500, () => arrive(name, opts));
     }
-    if (name !== 'bay') hoodTarget = 0;
+    /* Every road into the bay raises the hood: the rail button, the arrow
+       keys, a panel link, the hood itself. Arriving at a shut hood was the
+       one place the garage lied about what a station meant. The clunk only
+       fires on a real shut-to-open transition, so coming through
+       openHood() does not sound it twice. */
+    if (name === 'bay') {
+      if (hoodTarget < 0.5) shop.clunk();
+      hoodTarget = 1;
+    } else {
+      hoodTarget = 0;
+    }
   }
 
   function arrive(name, opts) {
@@ -436,9 +449,8 @@ async function start() {
 
   /* --------------------------------------------------------- the hood */
   function openHood() {
+    // still a toggle: shut it and step back, or let goto('bay') raise it
     if (hoodTarget > 0.5) { hoodTarget = 0; shop.clunk(0.42); goto('car'); return; }
-    hoodTarget = 1;
-    shop.clunk();
     goto('bay');
   }
 
@@ -610,6 +622,12 @@ async function start() {
     for (const m of car.lights.head) {
       if (m.material && m.material.emissive) m.material.emissive.setRGB(lampT * 0.85, lampT * 0.9, lampT);
     }
+    /* Angel eyes hold a low glow whether the lamps are on or not, the way
+       sidelights do, and come all the way up with the switch. Without that
+       floor the car has no face at all until you find the light pull. */
+    const ae = 0.44 + lampT * 0.56;
+    car.lights.angel.ring.color.setRGB(ae * 0.86, ae * 0.92, ae);
+    for (const h of car.lights.angel.halos) h.opacity = 0.16 + lampT * 0.34;
 
     // night mode: the acceptable version of "the room changes"
     const nk = 1 - Math.pow(0.004, dt);
@@ -621,6 +639,57 @@ async function start() {
       const c = nightMode ? 0.09 : 1;
       s.tube.color.setRGB(0.874 * c + 0.02, 0.914 * c + 0.02, 1 * c + 0.02);
       s.halo.material.opacity = 0.20 * (nightMode ? 0.15 : 1);
+    }
+
+    /* The driveway loop on the airbox lid. Only while the bay is actually
+       open, and held on its first frame under reduced motion. */
+    if (car.bay.group.visible) {
+      car.bay.miniStep(reduced ? 0 : clock.t);
+
+      /* The frames pick themselves up when the pointer finds them: they
+         lift off the cam cover towards the eye, turn to face it and come
+         up to full brightness. Held to 1.75x, and the travel scales with
+         how far out the camera is, so it always clears the frames beside
+         it without ever covering the bay. The lift is
+         along the line to the camera, so a plate never swings out through
+         the hood or the strut brace. */
+      /* Only once the panel is properly up. Mid-swing the hood underside
+         is still low over the bay, and a plate that has lifted 130mm
+         towards the eye would go through it. */
+      let hot = null;
+      if (hoodT > 0.9) {
+        ray.setFromCamera(pointerNdc, camera);
+        const pick = ray.intersectObjects(car.bay.plateHits, false)[0];
+        if (pick) hot = car.bay.plates[pick.object.userData.plateIndex];
+      }
+      car.bay.group.worldToLocal(camera.getWorldPosition(plateCam));
+      const hk = reduced ? 1 : 1 - Math.pow(0.004, dt);
+      for (const pl of car.bay.plates) {
+        pl.hover += ((pl === hot ? 1 : 0) - pl.hover) * hk;
+        if (pl.hover < 0.0008) {
+          pl.group.position.copy(pl.rest);
+          pl.group.quaternion.copy(pl.restQuat);
+          pl.group.scale.setScalar(1);
+          pl.face.material.color.setHex(0xbccfec);
+          continue;
+        }
+        const k = pl.hover * pl.hover * (3 - 2 * pl.hover);       // smoothstep
+        plateAim.position.copy(pl.rest);
+        plateAim.lookAt(plateCam);
+        /* Far enough towards the eye to clear the frames either side of it.
+           At 0.055 the plate grew to 1.75x but only rose about 74mm, less
+           than its own half-height once tilted, so it cut through its
+           neighbours on the cam cover. Travelling towards the camera is not
+           enough on its own either: from the low end of the cage that line
+           is almost horizontal, so the plate stands up without rising and
+           saws through them again. Hence the floor under the climb. */
+        pl.group.position.copy(pl.rest).lerp(plateCam, k * 0.105);
+        pl.group.position.z = Math.max(pl.group.position.z, pl.rest.z + k * 0.175);
+        pl.group.quaternion.slerpQuaternions(pl.restQuat, plateAim.quaternion, k);
+        pl.group.scale.setScalar(1 + k * 0.75);
+        pl.face.material.color.setRGB(0.737 + k * 0.263, 0.812 + k * 0.188, 0.925 + k * 0.075);
+      }
+      canvas.style.cursor = hot ? 'zoom-in' : '';
     }
 
     if (tier >= 2) dressing.blades.rotation.z -= dt * 7.4;
@@ -679,6 +748,33 @@ async function start() {
       ear.rotation.x = 0.30 - dogPerk * 0.46;
       ear.rotation.z = (i ? 1 : -1) * (0.12 + dogPerk * 0.10);
     }
+    /* Legs. Standing about he only shifts his weight, which you are meant
+       to feel rather than see. Bring the pointer close and the front paws
+       start lifting one after the other while the haunches settle: a play
+       bow, the ask. A click tucks all four under him on the way up and
+       reaches them back out to land. Rotating a leg always swings the foot
+       up and away from the dock, so none of this can push him through it. */
+    const hopK = reduced ? 0 : Math.sin(dogHop * Math.PI);
+    const legK = reduced ? 1 : 1 - Math.pow(0.06, dt);
+    for (const [i, leg] of dog.legs.entries()) {
+      const front = i < 2;
+      let fwd = 0, fold = 0;
+      if (!reduced) {
+        fwd = Math.sin(clock.t * 0.8 + i * 1.9) * 0.022;
+        if (front) {
+          const beat = Math.sin(clock.t * 3.1 + (i % 2 ? Math.PI : 0));
+          const lift = Math.max(0, beat) * dogPerk;
+          fwd += lift * 0.30; fold += lift * 0.34;
+        } else {
+          fwd -= dogPerk * 0.05; fold += dogPerk * 0.12;
+        }
+        fwd += hopK * (front ? 0.22 : -0.16);
+        fold += hopK * 0.34;
+      }
+      leg.rotation.x += (-fwd - leg.rotation.x) * legK;
+      dog.shins[i].rotation.x += (fold - dog.shins[i].rotation.x) * legK;
+    }
+
     const blink = Math.sin(clock.t * 0.9) > 0.985 ? 0.15 : 1;
     const eyeUp = 1 + dogPerk * 0.45;
     dog.eyeMat.color.setRGB(

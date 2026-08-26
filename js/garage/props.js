@@ -417,7 +417,7 @@ export function buildDog(scene) {
   rig.add(vent);
 
   /* ---- legs: stubby, which is most of the cuteness ---------------- */
-  const legs = [];
+  const legs = [], shins = [];
   const legPair = (z, hipY) => {
     for (const sx of [-1, 1]) {
       const leg = new THREE.Group();
@@ -428,17 +428,22 @@ export function buildDog(scene) {
       const upper = rbox(0.058, 0.15, 0.070, 0.024, shell);
       upper.position.set(0, -0.085, 0.006);
       leg.add(upper);
+      /* Everything below the knee hangs off its own group so a paw can fold
+         under him. Swinging the whole leg from the hip is a pendulum; a dog
+         asking you to play bends here. Rest pose is unchanged. */
+      const shin = new THREE.Group();
+      shin.position.set(0, -0.163, 0.006);
+      leg.add(shin);
       const knee = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), joint);
-      knee.position.set(0, -0.163, 0.006);
-      leg.add(knee);
+      shin.add(knee);
       const lower = rbox(0.046, 0.13, 0.052, 0.020, shell);
-      lower.position.set(0, -0.235, 0.002);
-      leg.add(lower);
+      lower.position.set(0, -0.072, -0.004);
+      shin.add(lower);
       const foot = new THREE.Mesh(new THREE.SphereGeometry(0.040, 12, 10), joint);
-      foot.position.set(0, -0.302, 0.008);
+      foot.position.set(0, -0.139, 0.002);
       foot.scale.set(1, 0.72, 1.15);
-      leg.add(foot);
-      legs.push(leg);
+      shin.add(foot);
+      legs.push(leg); shins.push(shin);
     }
   };
   legPair(0.175, 0.40);    // front
@@ -556,7 +561,7 @@ export function buildDog(scene) {
   g.add(boardGlow);
 
   return {
-    group: g, rig, head, eyeMat, dockLed, ears, tail, tail2, legs, antennaTip,
+    group: g, rig, head, eyeMat, dockLed, ears, tail, tail2, legs, shins, antennaTip,
     board: { canvas: boardCv, texture: boardTex, group: board },
     hotspots: [{ id: 'dog', mesh: dogHit, size: [0.9, 0.9] }],
   };
