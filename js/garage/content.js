@@ -28,7 +28,7 @@ export const CAR = {
     { k: 'Intake',   v: 'Karbonius CSL airbox', note: 'The CSL breathing setup.' },
     { k: 'Tune',     v: 'Evolve Alpha-N',       note: 'Alpha-N, no mass airflow sensor.' },
     { k: 'Dyno',     v: 'HTE dyno tune',        note: 'Tuned on the rollers, not by feel.' },
-    { k: 'Result',   v: '317.27 hp',            note: 'What the dyno actually printed.' },
+    { k: 'Result',   v: '317.27 whp',           note: 'What the dyno actually printed.' },
   ],
 };
 
