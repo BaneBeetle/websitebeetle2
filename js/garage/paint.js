@@ -546,3 +546,70 @@ export function detectLabel(text) {
   x.fillText(text, 14, 33);
   return toTexture(c);
 }
+
+/* ---- the car's own environment ------------------------------------ */
+
+/* envTexture() above is the room's, and every prop in the garage is tuned
+   against it — so the car gets its own rather than the room getting a new
+   one. Same garage, photographed properly.
+
+   The reference shots of the real car are all one lesson: what makes paint
+   read as paint is the value ORDER, not the brightness. Roof and hood are
+   the brightest things on the car because a horizontal panel reflects the
+   zenith; the flanks sit well below them because a vertical panel averages
+   the horizon against the floor; the sill is nearly black. So the zenith
+   here is genuinely lit, there is one narrow bright line at the horizon to
+   draw the shoulder streak, and everything under it falls off a cliff.
+   Raising the whole thing instead only makes a brighter toy — that was the
+   first attempt, and a real outdoor sky HDRI was the second: both lit the
+   sills as brightly as the roof and the car went flat.
+
+   Left as an equirect CanvasTexture on purpose. Assigning it to
+   material.envMap hands it to the renderer's cubeUV path, which PMREMs it
+   the same way scene.environment is already handled, so the car needs no
+   generator and no renderer reference to light itself. */
+export function carEnvTexture() {
+  const { c, x, w, h } = canvas(1024, 512);
+
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.000, '#6b7a91');   // lit ceiling, and so the hood
+  g.addColorStop(0.100, '#647388');
+  g.addColorStop(0.340, '#54627b');
+  g.addColorStop(0.440, '#414e64');
+  g.addColorStop(0.474, '#8496b4');
+  g.addColorStop(0.492, '#c2d2ea');   // the horizon line, and so the streak
+  g.addColorStop(0.503, '#171c23');   // floor starts, hard
+  g.addColorStop(0.600, '#0c0f14');
+  g.addColorStop(1.000, '#04060a');
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+
+  /* The room's two ceiling tubes, as the long highlights they draw. Kept
+     narrow and under full strength on purpose: the clearcoat lays a white
+     specular over the blue, so a wide bright ceiling does not read as a
+     brighter blue, it reads as silver. At 26px and full alpha the hood and
+     the tops of the fenders went grey at close range — the paint was gone.
+     Narrow bands leave a defined sheen sitting on a panel that is still
+     Interlagos. */
+  for (const cy of [0.15, 0.29]) {
+    const gg = x.createLinearGradient(0, h * cy - 17, 0, h * cy + 17);
+    gg.addColorStop(0, 'rgba(226,238,255,0)');
+    gg.addColorStop(0.5, 'rgba(240,248,255,0.70)');
+    gg.addColorStop(1, 'rgba(226,238,255,0)');
+    x.fillStyle = gg; x.fillRect(0, h * cy - 17, w, 34);
+  }
+
+  /* The door opening: one strong off-axis source, so walking round the car
+     sweeps a highlight down its flank instead of finding the same wash at
+     every angle. Kept tight for the same reason as the tubes — wide, it
+     silvered the whole side the door faces, which showed up worst from the
+     home view where that flank is most of the car. */
+  const d = x.createRadialGradient(w * 0.30, h * 0.478, 6, w * 0.30, h * 0.478, w * 0.14);
+  d.addColorStop(0, 'rgba(216,232,255,0.58)');
+  d.addColorStop(0.5, 'rgba(172,198,238,0.23)');
+  d.addColorStop(1, 'rgba(150,180,225,0)');
+  x.fillStyle = d; x.fillRect(0, 0, w, h);
+
+  const t = toTexture(c, { srgb: false });
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  return t;
+}

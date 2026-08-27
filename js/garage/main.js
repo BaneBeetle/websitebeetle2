@@ -707,6 +707,9 @@ async function start() {
     lights.key.intensity += (2.05 * want - lights.key.intensity) * nk;
     lights.hemi.intensity += (0.85 * (nightMode ? 0.3 : 1) - lights.hemi.intensity) * nk;
     lights.fill.intensity += (0.75 * (nightMode ? 0.55 : 1) - lights.fill.intensity) * nk;
+    // the rim is the light through the door opening, so it goes with them;
+    // left undimmed it became the brightest thing in the room after dark
+    lights.rim.intensity += (0.62 * (nightMode ? 0.35 : 1) - lights.rim.intensity) * nk;
     for (const s of room.strips) {
       const c = nightMode ? 0.09 : 1;
       s.tube.color.setRGB(0.874 * c + 0.02, 0.914 * c + 0.02, 1 * c + 0.02);

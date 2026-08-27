@@ -203,9 +203,16 @@ export function buildLights(scene) {
   fill.position.set(-3.4, 2.2, -3.0);
   scene.add(fill);
 
-  // rim from the door opening, so the car separates from the back wall
-  const rim = new THREE.DirectionalLight(0x9fb6e6, 0.55);
-  rim.position.set(-0.4, 1.3, 6.0);
+  /* rim from the door opening, so the car separates from the back wall.
+     Raised and swung off-axis: at the old near-horizontal (-0.4, 1.3, 6.0)
+     it hit the nose flat and never found an edge. From up here it grazes
+     the roof rail and the shoulder crease instead, which is the line the
+     reference photographs of the car are built on. Held at 0.62: enough
+     to draw the edge, little enough that the room does not move; pushing
+     it to 0.8 lit the bench top too. main.js eases this at night with the
+     rest of the rig, since the door opening is not bright after dark. */
+  const rim = new THREE.DirectionalLight(0x9fb6e6, 0.62);
+  rim.position.set(-1.6, 3.2, 4.6);
   scene.add(rim);
 
   return { hemi, key, fill, rim };
