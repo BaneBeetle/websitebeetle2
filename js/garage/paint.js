@@ -832,3 +832,68 @@ export function drawPrinterPanel(cv, pct, layer, layers, { done = false } = {}) 
   });
   return cv;
 }
+
+/* ---- the bench arm ------------------------------------------------ */
+/* Two small faces for Brian's own robot arm, both painted rather than
+   modelled because at the size the arm draws, a red servo label and a
+   letter pressed into a cube are a few pixels each: geometry for either
+   would cost draw calls and buy nothing. */
+
+/* A hobby servo, seen from any side: charcoal case with the maker's red
+   label wrapped round the middle. The label really does wrap the body on
+   the ones in the photo, so the same texture on all six faces of the
+   block is the honest mapping rather than a shortcut. */
+export function servoTexture() {
+  const { c, x, w, h } = canvas(64, 64);
+  x.fillStyle = '#1a1c21';
+  x.fillRect(0, 0, w, h);
+  // the moulding line down the case, and the faint sheen off the top edge
+  x.fillStyle = 'rgba(255,255,255,0.05)';
+  x.fillRect(0, 2, w, 2);
+  x.fillStyle = 'rgba(0,0,0,0.35)';
+  x.fillRect(0, h * 0.72, w, 2);
+  // the label
+  x.fillStyle = '#8e1f22';
+  x.fillRect(0, h * 0.30, w, h * 0.30);
+  x.fillStyle = '#a82a2c';
+  x.fillRect(0, h * 0.30, w, h * 0.06);
+  // the printing on it, which at this size is texture and not text
+  x.fillStyle = 'rgba(236,232,226,0.55)';
+  x.fillRect(w * 0.16, h * 0.41, w * 0.44, 3);
+  x.fillRect(w * 0.16, h * 0.49, w * 0.28, 2);
+  return toTexture(c);
+}
+
+/* A printed cube face: flat PLA with the letter pressed into it. The
+   letter is cut with the same two-tone bevel a real deboss catches, one
+   step darker on the lit side and one step lighter on the far one, and
+   deliberately low contrast — on the bench it should read as a mark in
+   the surface, not as a glyph floating over it. */
+export function cubeFaceTexture(fill, letter) {
+  const { c, x, w, h } = canvas(128, 128);
+  x.fillStyle = fill;
+  x.fillRect(0, 0, w, h);
+  // print lines, so the faces are not dead flat under a hard light
+  x.fillStyle = 'rgba(0,0,0,0.05)';
+  for (let y = 0; y < h; y += 4) x.fillRect(0, y, w, 1);
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.font = `700 ${Math.round(h * 0.44)}px ${FONT_D}`;
+  const cy = h * 0.53;
+  /* Walls first, floor last: a cut is read off its two inner edges, and
+     painting either of them after the floor puts the bevel on top of the
+     recess instead of around it.
+
+     Kept very low contrast on purpose. A letter with any real weight in it
+     turns a printed calibration cube into a toy alphabet block, and on the
+     bench these draw about twenty pixels across — at that size the mark
+     wants to be a change in the surface you half notice, which is also all
+     you can see of it in the photograph. */
+  x.fillStyle = 'rgba(255,255,255,0.085)';
+  x.fillText(letter, w / 2 + 3, cy + 3);      // the wall that faces the light
+  x.fillStyle = 'rgba(0,0,0,0.105)';
+  x.fillText(letter, w / 2 - 3, cy - 3);      // the wall in its own shadow
+  x.fillStyle = 'rgba(0,0,0,0.045)';
+  x.fillText(letter, w / 2, cy);              // and the floor of the cut
+  return toTexture(c);
+}
