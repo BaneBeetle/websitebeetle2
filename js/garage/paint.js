@@ -769,3 +769,66 @@ export function loadFloorMaps(aniso = 8) {
     tex('img/tex/concrete-rough.jpg'),
   ]).then(([color, normal, rough]) => ({ color, normal, rough }));
 }
+
+/* ---- the printer's panel ------------------------------------------ */
+
+/* Two inches of LCD on the front of the A1 Mini, which lands on screen at
+   about twenty pixels across from the bench station. Everything a real
+   slicer crowds onto that panel would be mud at that size, so it carries
+   the one number you would actually walk over to read, a bar under it,
+   and the layer count in the small type the rest of the room already
+   uses for machine readouts.
+
+   The green is the shop's working green, the same SCAN the drone's
+   detector and the arm's busy light already speak: a fourth accent for a
+   fourth machine would turn the bench into a paint chart. Held at 0.86 of
+   full so the panel never crosses the bloom threshold at 1.10 and flares.
+
+   Repaints into a canvas the caller owns rather than making a new one,
+   because a print cycle changes this a hundred times and a hundred fresh
+   CanvasTextures per lap is a texture leak with a progress bar on it.
+   Pass the `canvas()` handle back in as `into` and set needsUpdate. */
+export function printerPanel(w = 256, h = 176) { return canvas(w, h); }
+
+export function drawPrinterPanel(cv, pct, layer, layers, { done = false } = {}) {
+  const { x, w, h } = cv;
+  x.clearRect(0, 0, w, h);
+  x.fillStyle = '#0a0d11';
+  x.fillRect(0, 0, w, h);
+  /* the bezel's inner edge, so the glass sits in the case rather than on
+     it: one rectangle, and the panel stops looking like a sticker */
+  x.strokeStyle = 'rgba(150,170,200,0.10)';
+  x.lineWidth = 3;
+  x.strokeRect(1.5, 1.5, w - 3, h - 3);
+
+  const GREEN = 'rgba(64,206,120,0.86)';
+  const DIM = 'rgba(122,144,170,0.75)';
+  const num = String(Math.round(pct * 100));
+
+  line(x, done ? 'done' : 'printing', {
+    font: FONT_M, size: 19, weight: 500, color: DIM,
+    x: 18, y: 34, track: 3.4, upper: true,
+  });
+
+  /* the number, and nothing competing with it */
+  line(x, num, { font: FONT_M, size: 62, weight: 700, color: GREEN, x: 18, y: 106 });
+  x.save();
+  x.font = `700 62px ${FONT_M}`;
+  const numW = x.measureText(num).width;
+  x.restore();
+  line(x, '%', { font: FONT_M, size: 26, weight: 500, color: DIM,
+    x: 18 + numW + 8, y: 106 });
+
+  // the bar. Its track is the one grey the panel is allowed besides the type.
+  const bx = 18, by = 126, bw = w - 36, bh = 7;
+  x.fillStyle = 'rgba(122,144,170,0.18)';
+  x.fillRect(bx, by, bw, bh);
+  x.fillStyle = GREEN;
+  x.fillRect(bx, by, Math.max(2, bw * pct), bh);
+
+  line(x, `layer ${layer} / ${layers}`, {
+    font: FONT_M, size: 17, weight: 400, color: DIM,
+    x: 18, y: 160, track: 1.6, upper: true,
+  });
+  return cv;
+}

@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as P from './paint.js';
 import * as S from './screens.js';
 import { ROOM, X0, X1, Z_BACK, blobShadow, bakeAO } from './scene.js';
@@ -2051,4 +2052,424 @@ function buildScan(scene) {
   return { root, coneRig, cone, coneMat, foot, grid, gridMat, pulse, ringMat,
            cloud, cloudMat, lock, brackets, bracketMat, fitBrackets,
            label, labelMat, labelFor, sweep, sweepMat };
+}
+
+/* ------------------------------------------------------ the printer */
+/* Brian's A1 Mini, on the stretch of bench between the projector puck
+   and the Pi. A bedslinger is a very particular silhouette and it is the
+   silhouette that does the recognising here, not a badge: a squat cuboid
+   case with the plate sliding out of the front of it, two posts at the
+   back carrying a beam that climbs as the part grows, a head that runs
+   left and right along that beam, and a spool hung off the flank. No
+   wordmark anywhere, the same rule the car is built under.
+
+   It gets no real light. A PointLight at the nozzle would be the honest
+   thing and it would also change NUM_POINT_LIGHTS, which rebuilds every
+   shader in the room the first frame the printer is drawn and voids the
+   boot precompile. So the heat is emissive material and one additive
+   sprite, the trick the ceiling strips and the angel eyes already use. */
+
+/* Where it stands, and why there. The bench top is 0.62 deep by 3.7 long
+   and by this point almost none of it is free. Probing the live scene for
+   every visible box on the top leaves exactly one window wide enough:
+   between the projector puck ending at z -0.798 and the Pi starting at
+   z -0.275. The machine is sized to that window rather than the window
+   found for the machine, which is why the case is 0.25 across and not the
+   0.35 the real one would be at 1:1.
+
+   Two things the first pass got wrong. The spool does not fit the window,
+   and does not have to: it hangs at 125 mm and everything it overhangs
+   down there is under 30 mm tall, so it clears in the one axis that
+   matters. And the yaw is small on purpose. The bench camera already sits
+   a little to the +z side of its target, so a machine square to the wall
+   shows its front and a sliver of one flank; turning it 0.12 rad the
+   other way opens that flank and the spool reads as a disc rather than as
+   an edge. More yaw and the swept box eats its own clearance. */
+const PRN_AT = [3.320, 0.950, -0.552];
+const PRN_YAW = Math.PI / 2 - 0.12;      // local -Z faces the room
+const PRN_LAYERS = 312;
+
+/* One print, in seconds. Long enough that the growth is a thing you
+   notice having happened rather than a thing you watch happen, which is
+   what standing next to a printer is actually like. */
+const PRN_GROW = 46, PRN_HOLD = 5, PRN_CLEAR = 4;
+const PRN_CYCLE = PRN_GROW + PRN_HOLD + PRN_CLEAR;
+
+/* The plate, and the height of its top face, which is the datum every
+   other number in here is measured from. */
+const PRN_PLATE_TOP = 0.101;
+const PRN_BED_Z = 0.000;        // where the plate rests, under the nozzle
+const PRN_HEAD_Z = 0.000;       // the nozzle stays put in Y; the bed moves
+
+const PRN_BODY = () => new THREE.MeshStandardMaterial({ color: 0xa6abb3, roughness: 0.68, metalness: 0.06 });
+const PRN_DARK = () => new THREE.MeshStandardMaterial({ color: 0x20242b, roughness: 0.72, metalness: 0.28 });
+/* The accent, and only on edges: the shop already speaks blue for the
+   holograms and green for a machine that is working, and this is the
+   fourth machine, not a fourth colour. */
+const PRN_GREEN = () => new THREE.MeshStandardMaterial({ color: 0x2f9d5b, roughness: 0.45, metalness: 0.2 });
+
+/* Merge a pile of lumps into one geometry, then put its triangles in the
+   order a printer would lay them down. Sorting by centroid height and
+   walking drawRange up the buffer is the whole growth trick: one mesh,
+   one draw call, no per-frame geometry work, and above all no
+   renderer.localClippingEnabled, which would recompile every material in
+   the room for a figurine eight centimetres tall. */
+function printOrder(geos) {
+  const merged = mergeGeometries(geos.map((g) => g.toNonIndexed()), false);
+  merged.deleteAttribute('uv');          // reordering it too would be work for nothing
+  const pos = merged.attributes.position.array;
+  const nor = merged.attributes.normal.array;
+  const tris = pos.length / 9;
+  const order = new Array(tris);
+  const mid = new Float32Array(tris);
+  for (let t = 0; t < tris; t++) {
+    order[t] = t;
+    mid[t] = (pos[t * 9 + 1] + pos[t * 9 + 4] + pos[t * 9 + 7]) / 3;
+  }
+  order.sort((a, b) => mid[a] - mid[b]);
+  const p2 = new Float32Array(pos.length), n2 = new Float32Array(nor.length);
+  for (let t = 0; t < tris; t++) {
+    p2.set(pos.subarray(order[t] * 9, order[t] * 9 + 9), t * 9);
+    n2.set(nor.subarray(order[t] * 9, order[t] * 9 + 9), t * 9);
+  }
+  merged.setAttribute('position', new THREE.BufferAttribute(p2, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(n2, 3));
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+
+  /* How wide the part is at a given height, so the cap that closes off
+     the open top of a half drawn buffer can be the size of the layer
+     actually being laid. Read off the buffer rather than typed in,
+     because the shape is a pile of lumps and nobody knows its waist. */
+  const bb = merged.boundingBox;
+  const H = Math.max(1e-6, bb.max.y - bb.min.y);
+  const BINS = 40;
+  const prof = new Float32Array(BINS);
+  for (let t = 0; t < tris * 3; t++) {
+    const o = t * 3;
+    const b = Math.min(BINS - 1, Math.max(0, Math.floor(((p2[o + 1] - bb.min.y) / H) * BINS)));
+    const r = Math.hypot(p2[o], p2[o + 2]);
+    if (r > prof[b]) prof[b] = r;
+  }
+  // one smoothing pass, or the cap steps a millimetre at every bin edge
+  const sm = new Float32Array(BINS);
+  for (let i = 0; i < BINS; i++) {
+    sm[i] = (prof[Math.max(0, i - 1)] + prof[i] + prof[Math.min(BINS - 1, i + 1)]) / 3;
+  }
+  return {
+    geo: merged, tris, y0: bb.min.y, height: H,
+    radiusAt: (y) => {
+      const f = THREE.MathUtils.clamp((y - bb.min.y) / H, 0, 1) * (BINS - 1);
+      const i = Math.floor(f), j = Math.min(BINS - 1, i + 1);
+      return THREE.MathUtils.lerp(sm[i], sm[j], f - i);
+    },
+  };
+}
+
+/* The part on the plate: the black dragon with the green eyes that sits
+   on the real arm in the reference photograph. Built out of lumps rather
+   than modelled, because at eight centimetres tall on a bench across the
+   room what survives is a heavy sitting body, a head nearly as big as it,
+   four swept ear fins and two green dots, and anything finer than that is
+   triangles nobody will ever resolve. */
+function buildDragon() {
+  const geos = [];
+  const lump = (r, sx, sy, sz, px, py, pz, rx = 0, rz = 0) => {
+    const g = new THREE.SphereGeometry(r, 10, 7);
+    g.scale(sx, sy, sz);
+    if (rx) g.rotateX(rx);
+    if (rz) g.rotateZ(rz);
+    g.translate(px, py, pz);
+    geos.push(g);
+  };
+  // feet and haunches first: a print starts as a footprint, not a point
+  lump(0.011, 1, 0.72, 1.25, -0.014, 0.008, -0.019);
+  lump(0.011, 1, 0.72, 1.25, 0.014, 0.008, -0.019);
+  lump(0.016, 1, 0.95, 1, -0.019, 0.019, 0.006);
+  lump(0.016, 1, 0.95, 1, 0.019, 0.019, 0.006);
+  // the tail, curled round to one side the way it is in the photograph
+  lump(0.010, 1.9, 0.62, 1, 0.020, 0.007, 0.030, 0, 0.4);
+  lump(0.007, 1.5, 0.55, 1, 0.001, 0.006, 0.042);
+  // body
+  lump(0.026, 1.06, 1.0, 0.98, 0, 0.028, 0.002);
+  // stubby wings, folded against the flanks
+  lump(0.013, 0.42, 1.25, 0.85, -0.026, 0.032, 0.006, 0, -0.25);
+  lump(0.013, 0.42, 1.25, 0.85, 0.026, 0.032, 0.006, 0, 0.25);
+  // head, deliberately oversized, and the blunt snout under the eyes
+  lump(0.023, 1.05, 0.96, 1.0, 0, 0.060, -0.004);
+  lump(0.012, 0.9, 0.72, 1.0, 0, 0.055, -0.022);
+  // four ear fins, swept up and back
+  for (const sx of [-1, 1]) {
+    lump(0.011, 0.34, 1.5, 0.5, sx * 0.014, 0.078, 0.012, 0.5, sx * 0.30);
+    lump(0.008, 0.30, 1.1, 0.45, sx * 0.021, 0.071, 0.018, 0.7, sx * 0.45);
+  }
+  const built = printOrder(geos);
+
+  /* The eyes are their own mesh because they are the one part of him that
+     is not black, and they switch on when the print passes their layer
+     rather than fading in: a layer either exists or it does not. */
+  const EYE_Y = 0.0635;
+  const eyeGeo = mergeGeometries([-1, 1].map((sx) => {
+    const g = new THREE.SphereGeometry(0.0062, 8, 6).toNonIndexed();
+    g.deleteAttribute('uv');
+    g.scale(1, 1.12, 0.8);
+    g.translate(sx * 0.0098, EYE_Y, -0.0182);
+    return g;
+  }), false);
+  return { ...built, eyeGeo, eyeY: EYE_Y };
+}
+
+export function buildPrinter(scene, { reduced = false } = {}) {
+  const g = new THREE.Group();
+  g.name = 'printer';
+  g.position.set(...PRN_AT);
+  g.rotation.y = PRN_YAW;
+  scene.add(g);
+
+  const body = PRN_BODY(), dark = PRN_DARK(), green = PRN_GREEN();
+  const box = (w, h, d) => new THREE.BoxGeometry(w, h, d).toNonIndexed();
+  const merge = (list) => mergeGeometries(list.map((x) => {
+    const q = x.index ? x.toNonIndexed() : x;
+    q.deleteAttribute('uv');
+    return q;
+  }), false);
+
+  /* ---- the case ---------------------------------------------------- */
+  /* Everything that never moves and wears the same grey is one buffer.
+     Five boxes at this size were five draw calls buying a few pixels
+     each, which is the trade the arm's bolt heads already lost. */
+  const caseMesh = new THREE.Mesh(merge([
+    new RoundedBoxGeometry(0.238, 0.072, 0.225, 1, 0.008).translate(0, 0.044, 0.0175),
+    box(0.026, 0.243, 0.030).translate(-0.102, 0.2020, 0.112),   // left post
+    box(0.026, 0.243, 0.030).translate(0.102, 0.2020, 0.112),    // right post
+    box(0.238, 0.012, 0.046).translate(0, 0.3175, 0.107),        // the cap tying the posts
+  ]), body.clone());
+  g.add(caseMesh);
+
+  const plinth = new THREE.Mesh(box(0.222, 0.008, 0.208).translate(0, 0.004, 0.0175), dark);
+  g.add(plinth);
+
+  /* Two dark faces, one buffer. The front one is a recessed fascia with
+     the screen set into it, kept to half the width so the machine reads
+     as having a control panel rather than a slot in its nose.
+
+     The back one is the fix for a mistake worth writing down. The posts
+     and the cap were first built as an open inverted U, which is what the
+     real frame is, and from the bench station the hole between them
+     framed a piece of the CAPTURE hologram floating behind: a picture
+     frame with someone else's work in it. Closing the back with the plate
+     the electronics actually live behind fills the hole, and because that
+     plate is dark it hands the hologram a better background than the
+     pegboard did. */
+  const face = new THREE.Mesh(merge([
+    box(0.120, 0.030, 0.005).translate(-0.062, 0.042, -0.0975),
+    box(0.238, 0.232, 0.014).translate(0, 0.196, 0.132),
+  ]), dark);
+  g.add(face);
+  const edge = new THREE.Mesh(box(0.238, 0.004, 0.004).translate(0, 0.0785, -0.0920), green);
+  g.add(edge);
+
+  const panel = P.printerPanel();
+  P.drawPrinterPanel(panel, 0, 0, PRN_LAYERS);
+  const panelTex = P.toTexture(panel.c);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.050, 0.034),
+    new THREE.MeshBasicMaterial({ map: panelTex, toneMapped: false }));
+  screen.position.set(-0.062, 0.043, -0.1007);
+  screen.rotation.y = Math.PI;             // a plane faces +Z; the room is -Z
+  g.add(screen);
+
+  /* ---- the bed ----------------------------------------------------- */
+  /* The part rides the plate, so handing the print its position is a
+     parenting decision made once here rather than a transform copied
+     every frame. When the bed shuttles, the dragon shuttles. */
+  const bed = new THREE.Group();
+  bed.position.z = PRN_BED_Z;
+  g.add(bed);
+  bed.add(new THREE.Mesh(merge([
+    box(0.128, 0.010, 0.066).translate(0, 0.091, 0),
+    box(0.146, 0.005, 0.146).translate(0, 0.0985, 0),
+  ]), dark));
+
+  /* ---- the gantry and the head ------------------------------------- */
+  const gantry = new THREE.Group();
+  g.add(gantry);
+  gantry.add(new THREE.Mesh(merge([
+    box(0.230, 0.024, 0.030).translate(0, 0, 0.098),
+    box(0.230, 0.004, 0.004).translate(0, -0.014, 0.0825),
+  ]), body));
+
+  const head = new THREE.Group();
+  gantry.add(head);
+  const headBody = new THREE.Mesh(
+    new RoundedBoxGeometry(0.046, 0.052, 0.040, 1, 0.006), body);
+  headBody.position.set(0, -0.008, PRN_HEAD_Z + 0.018);
+  head.add(headBody);
+  head.add(new THREE.Mesh(merge([
+    box(0.038, 0.026, 0.006).translate(0, -0.006, PRN_HEAD_Z - 0.004),
+    box(0.020, 0.014, 0.018).translate(0, -0.037, PRN_HEAD_Z),          // heater block
+    new THREE.CylinderGeometry(0.0035, 0.0015, 0.010, 6).translate(0, -0.048, PRN_HEAD_Z),
+  ]), dark));
+
+  /* The nozzle's own heat, as one additive sprite. It is the only thing
+     on this machine allowed to be brighter than the room, and it is a
+     fraction of the arm's status light because a 0.4 mm nozzle at this
+     distance is a spark, not a lamp. DoubleSide so it reads from the
+     flank as well as the front. */
+  const nozzle = new THREE.Mesh(new THREE.PlaneGeometry(0.030, 0.030), new THREE.MeshBasicMaterial({
+    map: P.glowTexture('#ffcf9a', '255,176,110', '210,120,60'),
+    transparent: true, opacity: 0, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+  }));
+  nozzle.position.set(0, -0.054, PRN_HEAD_Z);
+  nozzle.renderOrder = 6;
+  head.add(nozzle);
+
+  /* ---- the spool --------------------------------------------------- */
+  /* Hung off the flank that faces the room, and hung high: the projector
+     puck and the Pi are both under 30 mm tall, so a spool whose lowest
+     point is at 125 mm clears them in the one axis that matters even
+     where it overhangs them in plan. */
+  const SPX = -0.152;
+  g.add(new THREE.Mesh(merge([
+    box(0.030, 0.052, 0.040).translate(-0.132, 0.186, 0.030),
+    new THREE.CylinderGeometry(0.013, 0.013, 0.040, 10).rotateZ(Math.PI / 2).translate(SPX - 0.002, 0.205, 0.030),
+  ]), ALU()));
+  const coil = new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.066, 0.042, 16),
+    new THREE.MeshStandardMaterial({ color: 0x171a1f, roughness: 0.52, metalness: 0.04 }));
+  coil.rotation.z = Math.PI / 2;
+  coil.position.set(SPX, 0.205, 0.030);
+  g.add(coil);
+  g.add(new THREE.Mesh(merge([-1, 1].map((s) =>
+    new THREE.CylinderGeometry(0.074, 0.074, 0.003, 16)
+      .rotateZ(Math.PI / 2).translate(SPX + s * 0.0215, 0.205, 0.030))),
+    new THREE.MeshStandardMaterial({
+      color: 0x5b626c, roughness: 0.42, metalness: 0.30,
+      transparent: true, opacity: 0.72,
+    })));
+
+  /* The filament, off the top of the coil and into the back of the case.
+     It stops at the inlet rather than chasing the head, because a tube
+     that tracked a moving toolhead would have to be rebuilt every frame
+     to buy a detail three pixels wide. */
+  const fil = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(SPX, 0.281, 0.030),
+    new THREE.Vector3(SPX + 0.032, 0.298, 0.078),
+    new THREE.Vector3(-0.078, 0.288, 0.126),
+  ]);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(fil, 12, 0.0025, 5, false),
+    new THREE.MeshStandardMaterial({ color: 0x9aa3ae, roughness: 0.5, metalness: 0.2 })));
+
+  /* ---- the print --------------------------------------------------- */
+  const D = buildDragon();
+  const print = new THREE.Mesh(D.geo, new THREE.MeshStandardMaterial({
+    color: 0x15181d, roughness: 0.44, metalness: 0.04, side: THREE.DoubleSide,
+  }));
+  print.position.y = PRN_PLATE_TOP;
+  bed.add(print);
+
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0x2bd36b, roughness: 0.30, metalness: 0,
+    emissive: 0x1c8a45, emissiveIntensity: 0.9,
+  });
+  const eyes = new THREE.Mesh(D.eyeGeo, eyeMat);
+  eyes.position.y = PRN_PLATE_TOP;
+  bed.add(eyes);
+
+  /* The layer being laid. It caps off the top of the print, which a
+     drawRange reveal otherwise leaves open, and it is the one warm thing
+     on the machine because molten PLA is warm. Emissive on a standard
+     material, not a light: see the note at the top of this section. */
+  const layerMat = new THREE.MeshStandardMaterial({
+    color: 0x2a1c14, roughness: 0.5, metalness: 0,
+    emissive: 0xff8a3d, emissiveIntensity: 0.55,
+  });
+  const layer = new THREE.Mesh(new THREE.CircleGeometry(1, 14), layerMat);
+  layer.rotation.x = -Math.PI / 2;
+  bed.add(layer);
+
+  /* A soft decal, not a part: it fades to nothing at its own edge, so it
+     is sized to the case's footprint rather than thrown wide, and it is
+     named so the clearance probe can leave it out of the solid volume the
+     way it leaves out the desk's own light spill. */
+  const sh = blobShadow(0.286, 0.258, 0.40);
+  sh.name = 'printer-shadow';
+  sh.position.set(0, 0.006, 0.0175);
+  g.add(sh);
+  g.updateMatrixWorld(true);
+  bakeAO(caseMesh, { reach: 0.5, strength: 0.30 });
+
+  /* ---- the loop ---------------------------------------------------- */
+  /* Every number below is a pure function of the clock, so a harness that
+     pins the clock and steps a fixed count lands on the same frame twice,
+     the rule the pup and the drone are already built to. */
+  let paintedPct = -1;
+  const state = {
+    group: g, bed, gantry, head, print, eyes, layer, screen,
+    panel, panelTex, layerMat, eyeMat, nozzleMat: nozzle.material,
+    tris: D.tris, height: D.height, y0: D.y0, eyeY: D.eyeY,
+    layers: PRN_LAYERS, cycle: PRN_CYCLE, plateTop: PRN_PLATE_TOP,
+  };
+
+  state.step = (t, night = false) => {
+    const u = ((t % PRN_CYCLE) + PRN_CYCLE) % PRN_CYCLE;
+    const printing = u < PRN_GROW;
+    const done = !printing && u < PRN_GROW + PRN_HOLD;
+    /* Eased at the ends only: a first layer goes down slowly and the last
+       few are small, which is what the curve is imitating rather than a
+       taste for easing. */
+    const raw = printing ? u / PRN_GROW : 1;
+    const k = raw * raw * (3 - 2 * raw);
+    const clearK = printing || done ? 0 : (u - PRN_GROW - PRN_HOLD) / PRN_CLEAR;
+
+    // the part
+    const shown = clearK > 0.35 ? 0 : k;
+    print.geometry.setDrawRange(0, Math.round(D.tris * shown) * 3);
+    print.visible = shown > 0;
+    const topY = D.y0 + D.height * shown;
+    eyes.visible = shown > 0 && topY >= D.eyeY;
+    const r = D.radiusAt(topY);
+    layer.visible = printing && shown > 0.004;
+    if (layer.visible) {
+      layer.position.y = PRN_PLATE_TOP + topY;
+      layer.scale.setScalar(Math.max(0.002, r));
+    }
+
+    /* The bed. It sweeps under the head the way a bedslinger's does, at
+       the width of the layer being laid rather than at a fixed stroke, so
+       the machine visibly settles down as the head gets small. At the end
+       of the cycle the plate runs all the way out, which is how a plate
+       gets cleared. */
+    const span = THREE.MathUtils.clamp(r / 0.030, 0.18, 1);
+    const eject = clearK > 0 ? Math.sin(Math.min(1, clearK * 1.6) * Math.PI * 0.5) : 0;
+    bed.position.z = PRN_BED_Z + (printing ? Math.sin(t * 2.9) * 0.022 * span : 0) - eject * 0.052;
+
+    /* The head, running the beam. Faster than the bed and not a multiple
+       of it, so the two never fall into the same figure. */
+    head.position.x = printing ? Math.sin(t * 4.3 + 0.7) * 0.072 * span : 0.072;
+    gantry.position.y = PRN_PLATE_TOP + THREE.MathUtils.clamp(topY, 0, D.height) + 0.058;
+
+    /* Heat follows what is actually being extruded and dies on the hold:
+       a machine that glows while it sits finished is a machine nobody
+       modelled. The night lift is the arm's, small and clamped, so the
+       spark never climbs towards the 1.10 the bloom thresholds at. */
+    nozzle.material.opacity = printing
+      ? (night ? 0.30 : 0.22) * (0.72 + 0.28 * Math.sin(t * 9.1)) : 0;
+    layerMat.emissiveIntensity = printing ? (night ? 0.72 : 0.55) : 0;
+    eyeMat.emissiveIntensity = night ? 1.15 : 0.90;
+
+    // the panel, repainted only when the number printed on it would change
+    const pct = printing ? k : (done ? 1 : 0);
+    const q = Math.round(pct * 100);
+    if (q !== paintedPct) {
+      paintedPct = q;
+      P.drawPrinterPanel(panel, pct, Math.round(pct * PRN_LAYERS), PRN_LAYERS, { done });
+      panelTex.needsUpdate = true;
+    }
+  };
+
+  /* Parked half printed under reduced motion, for the same reason the pup
+     is parked mid stride: a machine held at t=0 is a machine that has not
+     started, which reads as broken rather than as still. */
+  state.step(reduced ? PRN_GROW * 0.5 : 0);
+  return state;
 }

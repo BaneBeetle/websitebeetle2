@@ -267,12 +267,14 @@ async function start() {
   Props.buildSign(scene, coarse, QUERY.get('sign') === 'two');
 
   /* ------------------------------------------------- ambient machines */
-  /* A pup on patrol and an arm on the bench. Neither is clickable and
-     neither is in `targets`, so a ray fired at a hotspot goes straight
-     through both of them no matter where they have got to. */
+  /* A pup on patrol, an arm on the bench, a drone on the ceiling and a
+     printer running a job. None of them is clickable and none is in
+     `targets`, so a ray fired at a hotspot goes straight through all four
+     no matter where they have got to. */
   const pup = Props.buildPup(scene);
   const arm = Props.buildArm(scene);
   const drone = Props.buildDrone(scene);
+  const printer = Props.buildPrinter(scene, { reduced });
   const pupPos = new THREE.Vector3();
   const pupAhead = new THREE.Vector3();
   const pupHeadW = new THREE.Vector3();
@@ -1639,11 +1641,22 @@ async function start() {
         scan.sweep.position[alongZ ? 'z' : 'x'] = lo + (hi - lo) * walk;
         scan.sweepMat.opacity = 0.34 * lift * Math.sin(walk * Math.PI);
       } else droneLock = null;
+
+      /* ---- the printer --------------------------------------------- */
+      /* One call, because unlike the other three this machine's whole
+         state is a function of the clock and nothing else: no route to
+         sample, no camera to look at, no recognition to latch. It is
+         handed the clock and the night flag and works out the rest, which
+         is what keeps a fifty-five second print loop out of this file.
+         Night only lifts the two emissive terms, the same small clamped
+         lift the arm's status light takes. */
+      printer.step(clock.t, nightMode);
     }
     pup.group.visible = tier >= 1;
     arm.group.visible = tier >= 1;
     drone.group.visible = tier >= 1;
     drone.shadow.visible = tier >= 1;
+    printer.group.visible = tier >= 1;
     /* The scan is gated exactly where its driver is, and unconditionally,
        so dropping a tier or asking for less motion cannot leave a beam
        lit on the last values it was handed. */
