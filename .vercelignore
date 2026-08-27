@@ -1,0 +1,7 @@
+ref/
+.claude/
+node_modules
+scratch/
+*.log
+skills-lock.json
+package-lock.json
