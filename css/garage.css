@@ -211,15 +211,9 @@ body.deep .hint{opacity:0}
 .hint.gone{opacity:0}
 .hint.gone.peek{opacity:1}
 
-/* The rail tucks to a column of ticks after the first interaction. The
-   buttons keep their text and their place in the DOM - this clips them,
-   it does not hide them - so the tab order, the accessible names and the
-   screen-reader reading of the nav are all exactly what they were.
-   :focus-within is the half that matters: a keyboard user tabbing in
-   opens the rail without ever having hovered anything. */
-.rail button{max-width:240px;overflow:hidden;white-space:nowrap;transition:color .15s var(--ease),max-width .28s var(--ease)}
-.rail.tucked button{max-width:22px;padding-right:0}
-.rail.tucked:hover button,.rail.tucked:focus-within button{max-width:240px}
+/* The rail stays open: the station list is the map of the room, and a
+   map that hides when you look away is worse than no map. */
+.rail button{white-space:nowrap;transition:color .15s var(--ease)}
 
 /* --------------------------------------------------------------- panel */
 /* Real selectable HTML for whatever the camera is looking at. The 3D

@@ -719,20 +719,14 @@ async function start() {
      is furniture. It goes a beat and a half after the first drag rather
      than on the first pixel of it, so it reads as confirmation instead of
      as something that fled when you touched it. */
-  let hintGone = false, railTucked = false;
+  let hintGone = false;
   function retireHint() {
     if (hintGone || !hint) return;
     hintGone = true;
     setTimeout(() => hint.classList.add('gone'), 1500);
   }
-  /* The rail folds to its ticks once you have shown you can drive. Class
-     only: the buttons keep their text, their order and their focusability,
-     and CSS :focus-within opens it again for anyone arriving by keyboard. */
-  function tuckRail() {
-    if (railTucked || !rail) return;
-    railTucked = true;
-    rail.classList.add('tucked');
-  }
+  /* The rail used to fold to ticks after the first drag; Brian wants the
+     station list readable at all times, so it stays open for good. */
 
   /* -------------------------------------------------------- pointer */
   const ray = new THREE.Raycaster();
@@ -759,7 +753,7 @@ async function start() {
     if (!down) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 6) dragging = true;
-    if (dragging) { rig.orbit(dx, dy); retireHint(); tuckRail(); }
+    if (dragging) { rig.orbit(dx, dy); retireHint(); }
     lastX = e.clientX; lastY = e.clientY;
   });
   canvas.addEventListener('pointerup', (e) => {
@@ -786,7 +780,7 @@ async function start() {
 
   function handle(id) {
     // clicking a thing in the room counts as knowing how to drive too
-    retireHint(); tuckRail();
+    retireHint();
     switch (id) {
       case 'horn': shop.horn(); flashPlate(); return;
       case 'lamp': lampsOn = !lampsOn; shop.click(0.22); return;
