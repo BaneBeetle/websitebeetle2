@@ -654,6 +654,12 @@ async function start() {
   function checkPerf(now) {
     frames++;
     if (now - windowStart < 4000) return;
+    /* A window that ran long means rAF was not actually running for part
+       of it — a hidden tab, the boot screen, a sleeping laptop. Judging
+       it would punish the machine for time it never spent rendering, and
+       the ladder never climbs back up, so one polluted window used to
+       freeze every ambient machine for the rest of the session. */
+    if (now - windowStart > 8000) { frames = 0; windowStart = now; return; }
     const fps = (frames * 1000) / (now - windowStart);
     frames = 0; windowStart = now;
     if (fps < 40 && tier === 3) {
@@ -1290,6 +1296,7 @@ async function start() {
     ray,
     cursor(x, y) { pointerNdc.set(x, y); },
     get boardPhase() { return boardPhase; },
+    get tier() { return tier; },
     get filmFrame() { return filmN; },
     get locked() { return buttonsLocked; },
     unlock() { buttonsLocked = false; },
