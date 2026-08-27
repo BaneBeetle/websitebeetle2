@@ -59,7 +59,7 @@ export function buildSign(scene, touch) {
 
 /* ---------------------------------------------------------- workbench */
 
-export function buildBench(scene) {
+export function buildBench(scene, opts = {}) {
   const g = new THREE.Group();
   g.name = 'bench';
   const wallX = X1;
@@ -116,33 +116,23 @@ export function buildBench(scene) {
     g.add(ring);
   }
 
-  /* the monitor: the project index lives here */
-  const mon = new THREE.Group();
-  mon.position.set(wallX - 0.36, topY + 0.42, zc - 0.32);
-  mon.rotation.y = -Math.PI / 2 + 0.34;
-  g.add(mon);
+  /* the holo desk: the arc of panes where the monitor used to stand */
+  const holo = buildHoloDesk(g, hotspots, opts);
+  const { screenMat, idle, index } = holo;
 
-  const bezel = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.64, 0.035), new THREE.MeshStandardMaterial({
-    color: 0x14181e, roughness: 0.5, metalness: 0.4,
+  /* the emitter the arc is thrown from. Small, machined, and sitting
+     where the monitor's foot used to: without it the panes hang off
+     nothing and the desk reads as missing a thing rather than as having
+     a better one. */
+  const emit = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.062, 0.022, 14), ALU());
+  emit.position.set(wallX - 0.30, topY + 0.041, zc - 0.26);
+  g.add(emit);
+  const emitRing = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.005, 5, 14), new THREE.MeshBasicMaterial({
+    color: 0x7aa7ff, transparent: true, opacity: 0.85, toneMapped: false,
   }));
-  mon.add(bezel);
-  const idle = S.screenIdle(0);
-  const index = S.screenIndex();
-  const screenMat = S.screenMaterial(idle, index);
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.00, 0.585), screenMat);
-  screen.position.z = 0.019;
-  screen.name = 'monitor-screen';
-  mon.add(screen);
-  const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.42, 8), STEEL());
-  stand.position.set(0, -0.52, -0.02);
-  mon.add(stand);
-  const foot = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.02, 0.20), STEEL());
-  foot.position.set(0, -0.73, 0.02);
-  mon.add(foot);
-  const monHit = new THREE.Mesh(new THREE.BoxGeometry(1.30, 0.86, 0.30), new THREE.MeshBasicMaterial({ visible: false }));
-  monHit.position.z = 0.14;
-  mon.add(monHit);
-  hotspots.push({ id: 'bench', mesh: monHit, size: [1.30, 0.86] });
+  emitRing.rotation.x = Math.PI / 2;
+  emitRing.position.set(wallX - 0.30, topY + 0.053, zc - 0.26);
+  g.add(emitRing);
 
   /* Raspberry Pi on a breadboard: the Carbeetle classifier and the arm
      controller both run on one of these */
@@ -225,7 +215,246 @@ export function buildBench(scene) {
   g.add(sh);
 
   scene.add(g);
-  return { group: g, hotspots, screenMat, screen, idle, index, mon };
+  return { group: g, hotspots, screenMat, screen: holo.browser, idle, index, mon: holo.group, holo };
+}
+
+/* ------------------------------------------------------- the holo desk */
+/* An arc of panes over the bench, in the grammar of a workshop desk lit
+   only by its own instruments: translucent, additive, dense with small
+   type, and dim enough that the corner still reads as a dark garage.
+   Everything printed on them is real. The dyno figure is the dyno's, the
+   tags are the project's, the dates are the resume's; the density is the
+   effect, but invented density would just be noise with a font. */
+
+/* The arc is struck around the eye, not around the desk. Every pane sits
+   the same distance from where camera.js parks you at this station,
+   which is what makes an arc read as an arc instead of as a row of
+   screens seen at an angle. EYE is that parking spot, solved from
+   POI.bench; PHI is the bearing from it to the middle of the bench. */
+const HOLO_EYE = [1.36, 1.36, -0.38];
+const HOLO_PHI = 1.849;
+const GHOST_LEN = 0.55;
+
+/* dPhi swings a pane round the arc, r pushes it out from the eye, y is
+   plain height. Three panes at three sizes with one clearly dominant: a
+   row of equal rectangles would read as a menu, and this is meant to
+   read as a desk in use. A fourth pane carrying the tool stack lived
+   here for a while and spent the whole time fighting the browser for
+   the same corner of the frame, so its content moved onto the
+   diagnostics sheet instead. All three sit well clear of the arm's end
+   of the bench, which keeps its stretch of MDF to itself.
+   The band to compose in is not symmetric. The rig shifts its look-at
+   0.20 to the right whenever a panel is open, to park the subject clear
+   of it, and the panel then covers the right of the frame outright, so
+   what is left runs about -0.24 to +0.39 of dPhi and the arc leans into
+   it rather than sitting square. */
+const PANES = [
+  { id: 'browser', dPhi: 0.171, r: 1.744, y: 1.357, w: 0.802, h: 0.5012, order: 10, rz: 0 },
+  { id: 'diag', dPhi: -0.119, r: 1.458, y: 1.574, w: 0.509, h: 0.4929, order: 11, rz: -0.018 },
+  { id: 'capture', dPhi: -0.108, r: 1.337, y: 1.136, w: 0.400, h: 0.2875, order: 12, rz: 0.020 },
+];
+
+function holoPlace(node, dPhi, r, y) {
+  const phi = HOLO_PHI + dPhi;
+  node.position.set(HOLO_EYE[0] + r * Math.sin(phi), y, HOLO_EYE[2] + r * Math.cos(phi));
+  node.rotation.y = phi + Math.PI;        // face back down its own radius
+  return phi;
+}
+
+/* The Carbeetle, projected. The shell is already in memory for the real
+   car, so the ghost clones that geometry rather than fetching the glTF a
+   second time, and takes only its edges: a full wireframe of a car body
+   is a grey mass at this size, while the contour lines are the thing
+   that actually reads as a hologram. */
+function buildGhost(geo) {
+  const group = new THREE.Group();
+  if (!geo) return { group, spin: null, mat: null };
+
+  const edges = new THREE.EdgesGeometry(geo, 24);
+  const mat = new THREE.LineBasicMaterial({
+    color: 0x8ec2ff, transparent: true, opacity: 0.34,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
+  const lines = new THREE.LineSegments(edges, mat);
+  // a Group carries no draw of its own, so the order has to sit on the mesh
+  lines.renderOrder = 14;
+
+  edges.computeBoundingBox();
+  const bb = edges.boundingBox;
+  const c = bb.getCenter(new THREE.Vector3());
+  const size = bb.getSize(new THREE.Vector3());
+  lines.position.set(-c.x, -c.y, -c.z);
+
+  /* the shell stands Z-up in its own frame, the same way the engine bay
+     does, so the turntable carries a quarter turn to stand it up */
+  const tilt = new THREE.Group();
+  tilt.rotation.x = -Math.PI / 2;
+  tilt.add(lines);
+  const spin = new THREE.Group();
+  spin.scale.setScalar(GHOST_LEN / (Math.max(size.x, size.y, size.z) || 1));
+  spin.add(tilt);
+  group.add(spin);
+  return { group, spin, mat };
+}
+
+function buildHoloDesk(parent, hotspots, { ghost: ghostGeo = null, reduced = false } = {}) {
+  const group = new THREE.Group();
+  group.name = 'holo';
+  parent.add(group);
+
+  const glowTex = P.glowTexture('#bfd8ff', '130,170,240', '96,132,200');
+  const bleedMat = new THREE.MeshBasicMaterial({
+    map: glowTex, transparent: true, opacity: 0.10, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+  });
+
+  const idle = S.holoIdle(0);
+  const index = S.holoIndex();
+  const WING = {
+    capture: (p, im) => S.holoCapture(p, im),
+    diag: (p) => S.holoDiag(p),
+  };
+  const panes = {};
+  const list = [];
+
+  for (const spec of PANES) {
+    // the browser keeps the crossfade the bench already drives; the wings
+    // get the same material so a project change reads as one gesture
+    const first = spec.id === 'browser' ? idle : WING[spec.id](null, null);
+    const second = spec.id === 'browser' ? index : first;
+    const mat = S.holoScreenMaterial(first, second, { alpha: spec.id === 'browser' ? 1 : 0.88 });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(spec.w, spec.h), mat);
+    holoPlace(mesh, spec.dPhi, spec.r, spec.y);
+    mesh.rotation.z = spec.rz;
+    mesh.renderOrder = spec.order;
+    mesh.name = `holo-${spec.id}`;
+    group.add(mesh);
+
+    // the pane's own bloom, sat just behind it so the pegboard catches it.
+    // Held close to the pane's own size: any bigger and four soft
+    // rectangles merge into one sheet of fog across the wall.
+    const bleed = new THREE.Mesh(new THREE.PlaneGeometry(spec.w * 1.28, spec.h * 1.42), bleedMat);
+    holoPlace(bleed, spec.dPhi, spec.r + 0.05, spec.y);
+    bleed.renderOrder = spec.order - 5;
+    group.add(bleed);
+
+    const pane = {
+      id: spec.id, mesh, mat, baseY: spec.y, baseRz: spec.rz,
+      phase: list.length * 1.9, rate: 0.55 + list.length * 0.11,
+      own: spec.id !== 'browser',      // the browser's fade is main.js's
+    };
+    panes[spec.id] = pane;
+    list.push(pane);
+  }
+
+  // the browser pane is the hotspot: same id as before, so handle() and
+  // the rail button route exactly as they always did
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.78, 0.14),
+    new THREE.MeshBasicMaterial({ visible: false }));
+  panes.browser.mesh.add(hit);
+  hotspots.push({ id: 'bench', mesh: hit, size: [1.18, 0.78] });
+
+  /* the turntable, above and a little to the near side of the browser so
+     it never sits on top of what you are reading */
+  const ghost = buildGhost(ghostGeo);
+  holoPlace(ghost.group, 0.080, 1.636, 1.725);
+  ghost.group.rotation.y += 0.5;
+  group.add(ghost.group);
+
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.66), new THREE.MeshBasicMaterial({
+    map: glowTex, transparent: true, opacity: 0.20, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+  }));
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.copy(ghost.group.position).setY(1.640);
+  pool.renderOrder = 10;
+  group.add(pool);
+
+  /* what the arc spills onto the bench top. A pane that lights nothing
+     is a decal; this is the difference between the two. */
+  const spill = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 1.75), new THREE.MeshBasicMaterial({
+    map: glowTex, transparent: true, opacity: 0.17, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+  }));
+  spill.rotation.x = -Math.PI / 2;
+  spill.position.set(X1 - 0.31, 0.954, -0.66);
+  spill.renderOrder = 9;
+  group.add(spill);
+
+  /* ---- content ---------------------------------------------------- */
+
+  function fade(pane, tex) {
+    const u = pane.mat.uniforms;
+    u.tA.value = u.uProgress.value > 0.5 ? u.tB.value : u.tA.value;
+    u.tB.value = tex;
+    u.uProgress.value = reduced ? 1 : 0;
+  }
+
+  /* Photographs arrive late and out of order if you click quickly, so the
+     wing paints its empty state at once and the image is only allowed to
+     land if it is still the one being asked for. */
+  const cache = new Map();
+  let token = 0;
+
+  function photo(url) {
+    if (!url) return Promise.resolve(null);
+    if (!cache.has(url)) {
+      cache.set(url, new Promise((res) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => res(null);
+        im.src = url;
+      }));
+    }
+    return cache.get(url);
+  }
+
+  function sync(p) {
+    const mine = ++token;
+    fade(panes.capture, S.holoCapture(p, null));
+    fade(panes.diag, S.holoDiag(p));
+    const url = p ? p.photo : 'img/photo/carbeetle-800.jpg';
+    if (url) {
+      photo(url).then((im) => {
+        if (im && mine === token) fade(panes.capture, S.holoCapture(p, im));
+      });
+    }
+  }
+  /* The wings are built wearing their own p=null faces, so the only
+     thing still outstanding at boot is the photograph. */
+  photo('img/photo/carbeetle-800.jpg').then((im) => {
+    if (im && token === 0) fade(panes.capture, S.holoCapture(null, im));
+  });
+
+  /* ---- motion ------------------------------------------------------ */
+
+  function step(t, dt, animate) {
+    // a crossfade is state, not decoration: it finishes at any tier
+    for (const pane of list) {
+      const u = pane.mat.uniforms;
+      if (pane.own && u.uProgress.value < 1) {
+        u.uProgress.value = Math.min(1, u.uProgress.value + dt * 3.4);
+      }
+      u.uTime.value = animate ? t : 0;
+    }
+    if (!animate) {
+      // dropping a tier mid-session must not leave a pane parked at
+      // whatever drift it happened to be carrying that frame
+      for (const pane of list) {
+        pane.mesh.position.y = pane.baseY;
+        pane.mesh.rotation.z = pane.baseRz;
+      }
+      return;
+    }
+    for (const pane of list) {
+      pane.mesh.position.y = pane.baseY + Math.sin(t * pane.rate + pane.phase) * 0.005;
+      pane.mesh.rotation.z = pane.baseRz + Math.sin(t * pane.rate * 0.7 + pane.phase) * 0.004;
+    }
+    if (ghost.spin) ghost.spin.rotation.y = t * 0.34;
+    pool.material.opacity = 0.20 + 0.03 * Math.sin(t * 1.4);
+  }
+
+  return { group, browser: panes.browser.mesh, screenMat: panes.browser.mat, idle, index, ghost, sync, step };
 }
 
 function pegboardTexture() {
