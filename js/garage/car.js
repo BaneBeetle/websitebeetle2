@@ -22,7 +22,7 @@ import { blobShadow } from './scene.js';
 const HOOD = { yBack: -1.20, yFront: -2.215, xHalf: 0.735, zAtBack: 0.930, slope: 0.220 };
 export const HOOD_OPEN = -0.80;
 
-const PAINT = 0x27427f;          // Interlagos Blue
+const PAINT = 0x17255e;          // Interlagos Blue
 const CARBON = 0x1b1e24;
 
 export async function loadCar(scene, onProgress) {
@@ -53,19 +53,61 @@ export async function loadCar(scene, onProgress) {
     return out;
   };
 
-  /* ---- paint ------------------------------------------------------ */
+  /* ---- environment ------------------------------------------------- */
+  /* The room's scene.environment is a dim gradient with no floor and no
+     horizon, which is the right light for the props and the wrong light
+     for paint: it hands every panel the same value, so the sill reads as
+     bright as the roof and the car goes flat. The car gets its own, with
+     the range a photograph has (see carEnvTexture). scene.environment is
+     left alone — the room is not being relit, the car is just no longer
+     reflecting a room-sized softbox. */
+  const carEnv = P.carEnvTexture();
+  const envUsers = ['Material', 'Material.001', 'Material.002', 'Material.005',
+                    'Material.006', 'Material.007', 'Material.008',
+                    'wheel_metal.002', 'brake_disc', 'brake_disc1',
+                    'rubber.001', 'mirror', 'material'];
+  car.traverse((o) => {
+    if (o.isMesh && o.material && envUsers.includes(o.material.name)) o.material.envMap = carEnv;
+  });
+
+  /* ---- paint ------------------------------------------------------- */
+  /* GLTFLoader built this one as a MeshPhysicalMaterial — the glTF carries
+     KHR_materials_clearcoat — so the clearcoat below is real and always
+     has been. `body` and the carved hood share this material by reference,
+     so tuning it here reaches both and the two cannot drift apart.
+
+     Interlagos is a dark colour. The old 0x27427f was mid-blue and had to
+     be, because the flat environment was doing no work; against an env
+     with real range the albedo can sit down where the real paint sits and
+     let the reflection supply every value above it. Most of the apparent
+     brightness is the env now, so envMapIntensity comes a long way down
+     with it: at 1.55 the car was a mirror with a hint of blue. */
   const body = pick('Material');
   const bodyMat = body.material;
   bodyMat.color.setHex(PAINT);
-  bodyMat.metalness = 0.82;
-  bodyMat.roughness = 0.28;
+  bodyMat.metalness = 0.80;
+  bodyMat.roughness = 0.30;
   bodyMat.clearcoat = 1.0;
-  bodyMat.clearcoatRoughness = 0.045;
-  bodyMat.envMapIntensity = 1.55;
+  bodyMat.clearcoatRoughness = 0.04;
+  bodyMat.envMapIntensity = 0.58;
 
-  for (const m of ['Material.001', 'Material.008', 'Material.002', 'Material.006', 'Material.007']) {
+  for (const m of ['Material.008', 'Material.002', 'Material.006', 'Material.007']) {
     const mesh = pick(m);
     if (mesh) { mesh.material.envMapIntensity = 1.1; mesh.material.roughness = Math.min(1, (mesh.material.roughness ?? .5) + 0.12); }
+  }
+  /* Material.001 is the brightwork: the kidney surrounds and their slats,
+     and the window trim. It used to sit in the loop above at white /
+     metalness 1 / env 1.1, which was fine against the room's dim gradient
+     and is not fine against the car's own env — a mirror handed a brighter
+     world got brighter with it, and the kidneys filled in as two solid
+     white slabs. On the real car they read dark: you see the shadow
+     between the slats, and the chrome is a bright edge around and along
+     them, not a fill. Taking the mirror down restores that, and the window
+     trim stays a thin bright line either way. */
+  for (const c of all('Material.001')) {
+    const m = c.material;
+    m.color.setHex(0xa8b0ba);
+    m.metalness = 1.0; m.roughness = 0.36; m.envMapIntensity = 0.38;
   }
   const glass = pick('Material.005');
   if (glass) {
@@ -74,8 +116,63 @@ export async function loadCar(scene, onProgress) {
     glass.material.roughness = 0.08;
     glass.material.envMapIntensity = 2.2;
   }
+
+  /* ---- wheels, tyres, brakes --------------------------------------- */
+  /* The CSL wheels in the reference are satin, not chrome, and what sells
+     them is that the pockets between the spokes go dark. They could not:
+     the rim was white at 0.92/0.34 against a bright env, and behind it sat
+     a near-white brake disc and a red mirror of a disc hat, both still on
+     their glTF defaults. So the whole corner was one bright mass. Take the
+     rim off white, roughen it until the lip is the brightest part of it
+     again, and put the hardware behind it back in shadow. */
   for (const w of all('wheel_metal.002')) {
-    w.material.metalness = 0.92; w.material.roughness = 0.34; w.material.envMapIntensity = 1.4;
+    const m = w.material;
+    m.color.setHex(0x8f959d);
+    m.metalness = 0.88; m.roughness = 0.46; m.envMapIntensity = 0.66;
+  }
+  /* Rotor faces stay metal so they still catch a turned-steel sheen, but
+     dark enough to sit behind the spokes rather than glow through them. */
+  for (const d of all('brake_disc')) {
+    const m = d.material;
+    m.color.setHex(0x565c63);
+    m.metalness = 0.90; m.roughness = 0.38; m.envMapIntensity = 0.26;
+  }
+  /* brake_disc1 shipped as pure red at metalness 1, which rendered as a
+     red mirror behind every spoke and was the single most toy-like thing
+     on the car. It is the hat and the caliper body: near-black and rough. */
+  for (const d of all('brake_disc1')) {
+    const m = d.material;
+    m.color.setHex(0x111316);
+    m.metalness = 0.15; m.roughness = 0.92; m.envMapIntensity = 0.26;
+  }
+  /* Tyres came through at roughness 0.77, which is wet rubber. Keep the
+     normal map — it carries the sidewall lettering and the tread. */
+  for (const t of all('rubber.001')) {
+    const m = t.material;
+    m.color.setHex(0x0a0b0d);
+    m.metalness = 0.0; m.roughness = 0.95; m.envMapIntensity = 0.35;
+  }
+
+  /* ---- exhaust ------------------------------------------------------ */
+  /* The quad tips ('material') shipped as near-white chrome and lit up
+     like four bulbs under a dark bumper. Burnt titanium instead — and
+     burnt titanium is not a colour, it is thin-film interference on the
+     oxide layer heat leaves behind, which is exactly what iridescence
+     models. So the hue comes from the film, not from a hand-picked blue.
+
+     With no iridescenceThicknessMap three uses the TOP of the range for
+     the whole surface, so iridescenceThicknessRange[1] alone picks the
+     hue, and it cycles fast: 200nm came out green, 280 magenta, 360 teal.
+     150 lands on the blue band and leaves the bronze rim at the edge —
+     the heat gradient running out — which is the detail that makes it
+     read as burnt rather than painted. */
+  for (const e of all('material')) {
+    const m = e.material;
+    m.color.setHex(0x223a63);
+    m.metalness = 0.95; m.roughness = 0.30; m.envMapIntensity = 0.55;
+    m.iridescence = 1.0;
+    m.iridescenceIOR = 1.8;
+    m.iridescenceThicknessRange = [100, 150];
   }
 
   /* ---- angel eyes -------------------------------------------------- */
@@ -211,21 +308,57 @@ export async function loadCar(scene, onProgress) {
       n <= 6 && size.every((d) => d < 0.09) &&
       Math.abs(mid[0]) > 0.70 && Math.abs(mid[0]) < 0.83));
   }
-  /* A bulb deep behind the lens, which is all you ever see of one in
-     daylight. Warm, small, and always on — an unlit signal on a parked car
-     still catches a little of the room. It sits at the outboard end of the
-     lens, where the amber section of the real one is, and forward of where
-     the cones were or the dish masks it, the trap the coronas fell into. */
+  /* The amber bulb behind each signal lens, which is all you ever see of
+     one in daylight. Warm, small, and always on — an unlit signal on a
+     parked car still catches a little of the room.
+
+     This was a bare additive disc and it read as a smudge hovering off the
+     corner of the car. Two reasons, both fixed here. It was too big and
+     too far outboard: r 0.038 centred at x -0.818 reaches -0.856, while
+     the lens itself stops at -0.8418, so a third of the glow hung past the
+     lens edge over bodywork and background with nothing to sit on. And a
+     glow alone has no source — the reference car shows a discrete little
+     bulb behind the ribs, with an edge and a lit side, not a soft blob.
+
+     So: an actual bulb, with a tight corona around it rather than instead
+     of it, and both placed against the lens surface rather than its
+     bounding box. That distinction is the whole fix. blinker_glass is not
+     a flat panel — it wraps about 0.09 rearward toward the outboard end,
+     from y -2.2194 at the inboard edge to -2.1259 at the outboard one, so
+     a fixed y that sits inside the box still comes out through the glass
+     at the corner. These sit at the second bin in from the inboard edge,
+     where the lens spans y -2.1914..-2.1543, and at y -2.150 they are
+     behind all of it while staying forward of the dish that would mask
+     them, the trap the coronas fell into. blinker_glass draws at
+     renderOrder 11 and these at 6 and 7, so the ribs read over them the
+     way they do on the real lamp.
+
+     The two sides are not mirrored: this model's nose centreline is at
+     x -0.0236, so the right bulb is -0.0472 minus the left, not its
+     negation. */
   const blinkGlow = P.glowTexture('#ffd9a0', '255,196,120', '255,170,90');
-  for (const at of [[-0.8180, -2.1960, 0.6700], [0.7740, -2.1960, 0.6700]]) {
+  /* Muted on purpose: the signal is off. Bright enough to read as amber
+     glass through the ribs, dim enough not to look like it is flashing. */
+  const bulbMat = new THREE.MeshStandardMaterial({
+    color: 0x9c6530, emissive: 0xc9691f, emissiveIntensity: 0.30,
+    roughness: 0.55, metalness: 0.0,
+  });
+  for (const at of [[-0.7450, -2.1500, 0.6760], [0.6980, -2.1500, 0.6760]]) {
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.0135, 12, 10), bulbMat);
+    bulb.position.set(at[0], at[1], at[2]);
+    bulb.renderOrder = 6;
+    angel.add(bulb);
+
+    // co-located with the bulb, so the corona can never lead it out of the
+    // housing the way a disc set in front of it did
     const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(0.038, 24),
-      new THREE.MeshBasicMaterial({ map: blinkGlow, transparent: true, opacity: 0.46,
+      new THREE.CircleGeometry(0.022, 24),
+      new THREE.MeshBasicMaterial({ map: blinkGlow, transparent: true, opacity: 0.20,
         depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
     );
     dot.position.set(at[0], at[1], at[2]);
     dot.rotation.x = Math.PI / 2;
-    dot.renderOrder = 5;
+    dot.renderOrder = 7;
     angel.add(dot);
   }
 
