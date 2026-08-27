@@ -404,3 +404,145 @@ export function holoChip(x, text, { px = 0, y = 0, h = 30, size = 14, pad = 12,
   x.restore();
   return w;
 }
+
+/* ---- the drone's scan ---------------------------------------------- */
+
+/* One accent for the whole scan, in two brightnesses, and nothing else.
+   Green rather than the room's blues on purpose: every light in this
+   garage is already cool, so an ice-cyan beam would read as more room
+   lighting instead of as an instrument doing a job. Green separates by
+   hue instead of by brightness, which is what lets the whole effect stay
+   dim and still say "a sensor is running". The door opener's LED and the
+   arm's busy light are both green, so the room has the precedent. The
+   hue is nudged a few degrees cooler than the survey photograph's, which
+   was measured over warm ground, so it belongs to this concrete. */
+export const SCAN = '#2fc661';
+export const SCAN_LIT = '#80f0a5';
+
+/* Every rgba() below is mixed from those two and nothing else, because a
+   palette that is locked in a comment is not locked. `a` is the alpha,
+   and `lift` walks a colour toward white for the one place that needs a
+   hotter core than the accent itself. */
+const rgba = (hex, a = 1, lift = 0) => {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (v) => Math.round(v + (255 - v) * lift);
+  return `rgba(${mix((n >> 16) & 255)},${mix((n >> 8) & 255)},${mix(n & 255)},${a})`;
+};
+
+/* The beam is brightest a little under the sensor and gone before it
+   reaches the floor, which is the honest way round: light spreads and
+   thins, and leaving the bottom empty is what lets the footprint do the
+   landing instead of the two fighting over the same few centimetres.
+
+   Two things keep it from reading as a solid green wedge, which is what
+   the first cut of this was. The very tip is taken back down, so the
+   apex is a soft source rather than the sharp point of a triangle; and
+   the body is held low and let out slowly, so what carries the shape is
+   the ribs rather than a filled silhouette. The ribs are also the only
+   reason a slow spin is visible at all: a smooth gradient turning looks
+   like nothing whatsoever. */
+export function scanConeTexture() {
+  const { c, x, w, h } = canvas(128, 128);
+  x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+  // v runs 0 at the base, 1 at the apex: the top of the canvas is the apex
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.00, rgba(SCAN_LIT, 0.10));   // soft tip, not a point
+  g.addColorStop(0.09, rgba(SCAN_LIT, 0.34));
+  g.addColorStop(0.22, rgba(SCAN, 0.24, 0.30));
+  g.addColorStop(0.50, rgba(SCAN, 0.11));
+  g.addColorStop(0.80, rgba(SCAN, 0.03));
+  g.addColorStop(1.00, rgba(SCAN, 0));
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  /* Six ribs, and they fade out toward the floor with everything else so
+     the beam dissolves rather than stopping. */
+  x.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 6; i++) {
+    const cx = (i + 0.5) * (w / 6);
+    const s = x.createLinearGradient(cx - 6, 0, cx + 6, 0);
+    s.addColorStop(0, rgba(SCAN_LIT, 0));
+    s.addColorStop(0.5, rgba(SCAN_LIT, 0.30));
+    s.addColorStop(1, rgba(SCAN_LIT, 0));
+    x.fillStyle = s; x.fillRect(cx - 6, 0, 12, h);
+  }
+  const fade = x.createLinearGradient(0, 0, 0, h);
+  fade.addColorStop(0.00, 'rgba(0,0,0,1)');
+  fade.addColorStop(0.55, 'rgba(0,0,0,0.62)');
+  fade.addColorStop(1.00, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in';
+  x.fillStyle = fade; x.fillRect(0, 0, w, h);
+  return toTexture(c, { srgb: false });
+}
+
+/* The surveyed patch under the beam: the reference photograph's ground
+   grammar, which is a measured grid rather than a pool of light. Faded
+   radially to nothing so the patch has no edge to give away that it is a
+   square, and the centre cross is where the sensor is looking. */
+export function scanGridTexture() {
+  const { c, x, w, h } = canvas(256, 256);
+  x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+  x.strokeStyle = rgba(SCAN, 0.55);
+  x.lineWidth = 1;
+  for (let i = 1; i < 8; i++) {
+    const p = (i / 8) * w;
+    x.beginPath(); x.moveTo(p, 0); x.lineTo(p, h); x.stroke();
+    x.beginPath(); x.moveTo(0, p); x.lineTo(w, p); x.stroke();
+  }
+  // the cross at the aim point, a shade brighter than the ruling
+  x.strokeStyle = rgba(SCAN_LIT, 0.80);
+  x.beginPath(); x.moveTo(w / 2, h / 2 - 16); x.lineTo(w / 2, h / 2 + 16);
+  x.moveTo(w / 2 - 16, h / 2); x.lineTo(w / 2 + 16, h / 2); x.stroke();
+  // radial falloff, punched through with destination-in so it eats alpha
+  const g = x.createRadialGradient(w / 2, h / 2, w * 0.10, w / 2, h / 2, w * 0.50);
+  g.addColorStop(0, 'rgba(0,0,0,1)');
+  g.addColorStop(0.65, 'rgba(0,0,0,0.55)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in';
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  return toTexture(c, { srgb: false });
+}
+
+/* A single line. The lock-on sweep is one plane wearing this, walked
+   through the target once, which is all a scan line ever is.
+
+   The falloff is deliberately brutal, and the first cut of this was the
+   one real mistake in the effect. Ramping the alpha from the edge of the
+   plane inward turned the whole plane into a soft glow, and since the
+   car's glass is transparent and writes no depth, that glow came
+   straight through the windscreen and washed the whole glasshouse green
+   from the engine bay station. Kept inside a tenth of the plane it is a
+   line crossing the glass instead of a tint filling it, which is both
+   the correct reading and the safe one. */
+export function scanSweepTexture() {
+  const { c, x, w, h } = canvas(64, 64);
+  x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+  const g = x.createLinearGradient(0, 0, w, 0);
+  g.addColorStop(0.00, rgba(SCAN, 0));
+  g.addColorStop(0.45, rgba(SCAN, 0));
+  g.addColorStop(0.47, rgba(SCAN, 0.20));
+  g.addColorStop(0.50, rgba(SCAN_LIT, 0.95, 0.28));   // the core, lifted toward white
+  g.addColorStop(0.53, rgba(SCAN, 0.20));
+  g.addColorStop(0.55, rgba(SCAN, 0));
+  g.addColorStop(1.00, rgba(SCAN, 0));
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  return toTexture(c, { srgb: false });
+}
+
+/* The recognition label, in the grammar of the project's own detector
+   output: a name and a confidence, set small and left aligned off a tick
+   that points back at the corner of the box it belongs to. The real
+   frames put red text straight on the image; red would read as an alarm
+   in here and would fight everything else, so the scan accent carries it
+   and the layout does the rest of the work. */
+export function detectLabel(text) {
+  const { c, x, w, h } = canvas(256, 64);
+  x.font = `500 26px ${FONT_M}`;
+  x.textBaseline = 'middle';
+  x.textAlign = 'left';
+  // the tick: a short rule the text sits off, the way the frames hang
+  // their label off the top left corner of the box
+  x.strokeStyle = SCAN_LIT; x.lineWidth = 3;
+  x.beginPath(); x.moveTo(3, 12); x.lineTo(3, 52); x.stroke();
+  x.fillStyle = SCAN_LIT;
+  x.fillText(text, 14, 33);
+  return toTexture(c);
+}

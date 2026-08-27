@@ -156,6 +156,38 @@ async function start() {
   const dronePos = new THREE.Vector3();
   const droneAhead = new THREE.Vector3();
   let droneYaw = null, droneBank = 0, dronePitch = 0;
+
+  /* What the drone's camera is allowed to recognise, and where.
+     The car's box is measured off the loaded model rather than typed in,
+     because the model is the only thing that knows how long an E46 is.
+     Iron Bark's is fitted to the robot itself: its group's own bounds
+     swallow the dock and the behaviour board on the wall above it, and
+     bracketing three metres of wall would say the drone had recognised
+     the furniture.
+
+     The two triggers are both pure functions of the sampled flight, so
+     the moment is a place on the ring rather than a time on a clock and
+     __exp.step lands on the same frame twice. Iron Bark is recognised on
+     the dwell that already holds over its corner, so the moment is the
+     hold. The car is recognised on the pass across its roof, so the
+     moment is a stretch of arc length. They sit seven metres apart on a
+     seventeen metre lap, which is nine seconds of quiet either side:
+     that is the cooldown, and it costs no timer to keep.
+
+     0.91 is not decoration: it is what the detector actually prints over
+     this car in the frame hanging on the bench wall. Iron Bark's 0.87 is
+     the one invented number here, and it is deliberately not another
+     0.91, because two identical scores would read as a placeholder. */
+  const carBox = new THREE.Box3().setFromObject(car.root);
+  const DRONE_SCANS = [
+    { id: 'ironbark', label: 'IRON BARK 0.87', wp: 3,
+      min: new THREE.Vector3(-2.64, 0.04, -4.83),
+      max: new THREE.Vector3(-1.96, 0.74, -4.01) },
+    { id: 'car', label: 'CARBEETLE 0.91', u0: 0.795, u1: 0.895,
+      min: carBox.min.clone(), max: carBox.max.clone() },
+  ];
+  let droneLock = null, scanFloor = 0;
+  const scanCam = new THREE.Vector3();
   setProgress(0.92);
 
   /* ---------------------------------------------------------- picking */
@@ -1043,11 +1075,133 @@ async function start() {
         Math.min(1, 0.56 * (nightMode ? 1.2 : 1)),
         Math.min(1, 0.75 * (nightMode ? 1.2 : 1)),
         Math.min(1, 1 * (nightMode ? 1.2 : 1)));
+
+      /* ---- the scan ------------------------------------------------- */
+      /* A beam terminates on whatever it hits, so the first thing the
+         sensor needs to know is its clearance: crossing the car, the
+         floor is effectively a metre and a half closer. Eased rather
+         than switched, or the beam would change length the instant the
+         drone crossed the line of the bumper. This is also what keeps
+         the scan off the car: the beam shortens to nothing much and the
+         ground clutter fades out exactly when the drone is overhead, so
+         the recognition frame has the moment to itself. */
+      const scan = drone.scan;
+      const overCar = dronePos.x > carBox.min.x - 0.12 && dronePos.x < carBox.max.x + 0.12
+                   && dronePos.z > carBox.min.z - 0.12 && dronePos.z < carBox.max.z + 0.12;
+      scanFloor += ((overCar ? carBox.max.y : 0) - scanFloor) * Math.min(1, dt * 2.6);
+      const clearance = Math.max(0.30, drone.group.position.y - scanFloor);
+      /* how much of the beam is landing on open concrete: clear floor is the
+         full two metres, and anything less than that is the car */
+      const onFloor = THREE.MathUtils.clamp((clearance - 0.9) / 0.8, 0, 1);
+
+      /* The sensor is gimballed, so it lags the airframe rather than
+         whipping with it: a third of the lean, which is enough to read
+         as coupled and not enough to sling the footprint across the
+         floor every time the drone rounds a corner. */
+      const sTilt = droneBank * 0.34, sPitch = dronePitch * 0.34;
+      scan.coneRig.position.set(drone.group.position.x,
+                                drone.group.position.y - 0.030,
+                                drone.group.position.z);
+      scan.coneRig.rotation.set(sPitch, 0, sTilt);
+      scan.cone.rotation.y = (clock.t * 0.5) % (Math.PI * 2);   // slow: the ribs read as live
+      /* Scaled on all three axes, not just height. A beam has a fixed
+         spread angle, so a shorter throw is a narrower cone, and the one
+         that only stretched vertically went squat and wide over the car
+         instead of tightening the way a real one does. */
+      scan.cone.scale.set(clearance * 0.5, clearance, clearance * 0.5);
+      /* breathing, not blinking: the two rates are not multiples, so the
+         beam never settles into an obvious loop */
+      const breath = 0.86 + Math.sin(clock.t * 1.7) * 0.09 + Math.sin(clock.t * 0.63) * 0.05;
+      scan.coneMat.opacity = (nightMode ? 0.30 : 0.22) * breath * (0.35 + onFloor * 0.65);
+
+      /* Where the tilted axis actually meets the floor, so the patch is
+         somewhere the beam is pointing rather than dead under the hull. */
+      scan.foot.position.set(dronePos.x + Math.tan(sTilt) * clearance,
+                             0, dronePos.z - Math.tan(sPitch) * clearance);
+      const spread = 0.42 + clearance * 0.30;
+      scan.foot.scale.setScalar(spread);
+      scan.gridMat.opacity = 0.16 * onFloor;
+
+      /* One ranging pulse every beat and a half, expanding and dying.
+         Driven off the clock alone, so it is the same pulse on the same
+         frame however the drone got there. The returns come back with
+         it: the speckle rides the same envelope as the ring rather than
+         sitting at a constant brightness, which is the difference
+         between a floor that is being measured and a floor with a green
+         pattern painted on it. */
+      const beat = (clock.t / 1.6) % 1;
+      const ping = Math.max(0, 1 - beat) * Math.min(1, beat * 7);
+      scan.pulse.scale.setScalar(0.22 + beat * 0.95);
+      scan.ringMat.opacity = 0.30 * onFloor * ping;
+      scan.cloudMat.opacity = 0.34 * onFloor * (0.58 + 0.42 * ping);
+
+      /* ---- recognition ---------------------------------------------- */
+      const iron = DRONE_SCANS[0], beetle = DRONE_SCANS[1];
+      const du = (D.s / drone.len) % 1;
+      let lock = null, lockK = 0;
+      if (D.hold > 0 && D.stop === drone.route[iron.wp]) {
+        lock = iron; lockK = D.hold;
+      } else if (du >= beetle.u0 && du < beetle.u1) {
+        lock = beetle; lockK = (du - beetle.u0) / (beetle.u1 - beetle.u0);
+      }
+      scan.lock.visible = !!lock;
+      if (lock) {
+        /* The line walks the long axis of whatever it found, so the plane
+           it rides is broadside to that walk and only as wide as the
+           other side of the box. Sized off the target once, because a
+           car and a robot dog are not going to change shape. */
+        const sx = lock.max.x - lock.min.x, sz = lock.max.z - lock.min.z;
+        const alongZ = sz >= sx;
+        if (lock !== droneLock) {
+          const first = !scan.labelMat.map;
+          droneLock = lock;
+          scan.fitBrackets(lock.min, lock.max);
+          scan.labelMat.map = scan.labelFor(lock.label);
+          // null to a texture is the one swap that needs a recompile
+          if (first) scan.labelMat.needsUpdate = true;
+          /* The label straddles whichever top corner the visitor is
+             standing nearest, rather than a fixed one. Pinned to a fixed
+             corner it hung off the far side of the car and got cropped
+             to "TLE 0.91" from the engine bay; on the near corner it
+             lands beside the thing it names from every wide station.
+             Chosen once, when the lock latches, so it cannot pop from
+             corner to corner while the moment is playing. */
+          camera.getWorldPosition(scanCam);
+          scan.label.position.set(
+            Math.abs(scanCam.x - lock.min.x) < Math.abs(scanCam.x - lock.max.x)
+              ? lock.min.x : lock.max.x,
+            lock.max.y + 0.10,
+            Math.abs(scanCam.z - lock.min.z) < Math.abs(scanCam.z - lock.max.z)
+              ? lock.min.z : lock.max.z);
+          scan.sweep.rotation.set(0, alongZ ? 0 : Math.PI / 2, 0);
+          scan.sweep.scale.set((alongZ ? sx : sz) * 1.05,
+                               (lock.max.y - lock.min.y) * 1.05, 1);
+        }
+        /* Latches quickly and lets go slowly, the way a detector does.
+           Nothing in here reads a clock, so the whole moment replays. */
+        const lift = Math.min(1, lockK / 0.10) * Math.min(1, (1 - lockK) / 0.26);
+        scan.bracketMat.opacity = 0.85 * lift;
+        scan.labelMat.opacity = 0.95 * lift;
+        /* one pass through the middle of the hold, dead at both ends so
+           the plane is never caught sitting still */
+        const walk = THREE.MathUtils.clamp((lockK - 0.14) / 0.62, 0, 1);
+        const lo = alongZ ? lock.min.z : lock.min.x;
+        const hi = alongZ ? lock.max.z : lock.max.x;
+        scan.sweep.position.set(
+          (lock.min.x + lock.max.x) / 2, (lock.min.y + lock.max.y) / 2,
+          (lock.min.z + lock.max.z) / 2);
+        scan.sweep.position[alongZ ? 'z' : 'x'] = lo + (hi - lo) * walk;
+        scan.sweepMat.opacity = 0.34 * lift * Math.sin(walk * Math.PI);
+      } else droneLock = null;
     }
     pup.group.visible = tier >= 1;
     arm.group.visible = tier >= 1;
     drone.group.visible = tier >= 1;
     drone.shadow.visible = tier >= 1;
+    /* The scan is gated exactly where its driver is, and unconditionally,
+       so dropping a tier or asking for less motion cannot leave a beam
+       lit on the last values it was handed. */
+    drone.scan.root.visible = tier >= 2 && !reduced;
 
     rig.update(dt, now);
     renderer.render(scene, camera);
