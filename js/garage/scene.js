@@ -21,19 +21,37 @@ const STENCILS = [
   { text: 'still building', u: 0.62, v: 0.925, size: 36, rot: 180 },
 ];
 
-export function buildRoom(scene, quality) {
+export function buildRoom(scene, opts = {}) {
+  const { floorMaps = null, aniso = 8, lowDetail = false } = opts;
   const room = new THREE.Group();
   room.name = 'room';
   scene.add(room);
 
-  const floorTex = P.floorTexture(STENCILS);
+  const floorTex = P.floorTexture(STENCILS, floorMaps && floorMaps.color, lowDetail);
+  floorTex.anisotropy = aniso;
   const wallTex = P.wallTexture();
   wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
 
   /* ---- floor ------------------------------------------------------ */
+  /* The painted canvas carries what the floor SAYS - stencils, pools,
+     parking box - and the two tiling maps carry how it BEHAVES. Splitting
+     it that way is what lets the slab have a real grazing response without
+     the wayfinding being tiled four times along with the grain.
+     normalScale is held low on purpose: at 1 this concrete is a quarry,
+     and the room only needs the floor to stop being paper. */
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorTex, roughness: 0.44, metalness: 0.06, color: 0xffffff,
   });
+  if (floorMaps) {
+    floorMat.normalMap = floorMaps.normal;
+    floorMat.normalScale.set(0.45, 0.45);
+    floorMat.roughnessMap = floorMaps.rough;
+    /* roughnessMap multiplies this, and the map averages near 0.55, so the
+       flat 0.44 would land the slab around 0.24 and turn it into polished
+       showroom epoxy. Lifted so the product stays near where the tuned
+       matte value was, with the map now supplying the variation. */
+    floorMat.roughness = 0.86;
+  }
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, (Z_DOOR + Z_BACK) / 2);
@@ -99,7 +117,7 @@ export function buildRoom(scene, quality) {
      The arrival shot stands here, so it cannot be a void. */
   const apron = new THREE.Mesh(
     new THREE.PlaneGeometry(ROOM.w + 7, 9),
-    new THREE.MeshStandardMaterial({ map: apronTexture(), roughness: 0.72, metalness: 0.05 })
+    new THREE.MeshStandardMaterial({ map: apronTexture(lowDetail), roughness: 0.72, metalness: 0.05 })
   );
   apron.rotation.x = -Math.PI / 2;
   apron.position.set(0, -0.004, Z_DOOR + 4.4);
@@ -172,14 +190,21 @@ export function buildRoom(scene, quality) {
 }
 
 /* Asphalt with a seam and a wet-looking spill of light from the door. */
-function apronTexture() {
-  const { c, x, w, h } = P.canvas(1024, 1024);
+function apronTexture(lowDetail = false) {
+  /* Same bargain as the floor, and an easier one: the driveway is only
+     ever seen from inside looking out through a door, at a glancing angle,
+     for the length of the arrival. */
+  const S = lowDetail ? 512 : 1024;
+  const k = S / 1024;
+  const { c, x, w, h } = P.canvas(S, S);
   x.fillStyle = '#0e1116'; x.fillRect(0, 0, w, h);
-  for (let i = 0; i < 4200; i++) {
-    x.fillStyle = `rgba(${Math.random() < .5 ? '255,255,255' : '0,0,0'},${0.010 + Math.random() * 0.020})`;
-    x.beginPath(); x.arc(Math.random() * w, Math.random() * h, 1 + Math.random() * 14, 0, 6.284); x.fill();
+  const rnd = P.seeded(0xa5b8a17e);
+  const grains = Math.round(4200 * k * k);
+  for (let i = 0; i < grains; i++) {
+    x.fillStyle = `rgba(${rnd() < .5 ? '255,255,255' : '0,0,0'},${0.010 + rnd() * 0.020})`;
+    x.beginPath(); x.arc(rnd() * w, rnd() * h, (1 + rnd() * 14) * k, 0, 6.284); x.fill();
   }
-  x.strokeStyle = 'rgba(0,0,0,0.5)'; x.lineWidth = 5;
+  x.strokeStyle = 'rgba(0,0,0,0.5)'; x.lineWidth = Math.max(2, 5 * k);
   x.beginPath(); x.moveTo(0, h * 0.42); x.lineTo(w, h * 0.44); x.stroke();
   const g = x.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, 'rgba(150,175,220,0.22)');
@@ -189,17 +214,35 @@ function apronTexture() {
   return P.toTexture(c);
 }
 
+/* Every rig light carries its own daylight value and its own night
+   multiplier, because main.js eases toward these numbers on every frame.
+   A value typed here and a different one typed in the loop does not read
+   as a disagreement: the loop wins, and the light quietly slides back to
+   whatever the loop believes within about a second. One source, so
+   retuning a light here is the whole edit and adding one cannot be
+   forgotten at night. */
+function rigLight(light, base, night) {
+  light.intensity = base;
+  light.userData.base = base;
+  light.userData.night = night;
+  return light;
+}
+
 export function buildLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xa9bede, 0x1a1712, 0.85);
+  /* The room used to sit at 0.85 of hemisphere, which lit every surface
+     from every direction and is why nothing in the frame was darker than
+     anything else. Halved: the falloff into the corners is now the thing
+     that makes the middle of the room read as lit. */
+  const hemi = rigLight(new THREE.HemisphereLight(0xa9bede, 0x1a1712), 0.42, 0.30);
   scene.add(hemi);
 
   // key: stands in for the two ceiling tubes
-  const key = new THREE.DirectionalLight(0xdfe8f8, 2.05);
+  const key = rigLight(new THREE.DirectionalLight(0xdfe8f8), 2.35, 0.16);
   key.position.set(1.4, 4.4, 1.6);
   scene.add(key);
 
   // fill from the far corner, cool, keeps the car's shadow side readable
-  const fill = new THREE.DirectionalLight(0x7d9ad6, 0.75);
+  const fill = rigLight(new THREE.DirectionalLight(0x7d9ad6), 0.52, 0.55);
   fill.position.set(-3.4, 2.2, -3.0);
   scene.add(fill);
 
@@ -210,12 +253,63 @@ export function buildLights(scene) {
      reference photographs of the car are built on. Held at 0.62: enough
      to draw the edge, little enough that the room does not move; pushing
      it to 0.8 lit the bench top too. main.js eases this at night with the
-     rest of the rig, since the door opening is not bright after dark. */
-  const rim = new THREE.DirectionalLight(0x9fb6e6, 0.62);
+     rest of the rig, since the door opening is not bright after dark.
+
+     Now at 0.78. The old ceiling on this was the bench top catching it,
+     and the bench is no longer lit by the room: it has its own tungsten,
+     which is warm, so a little more cool spill along the roof rail reads
+     as a different light rather than as the same wash getting brighter. */
+  const rim = rigLight(new THREE.DirectionalLight(0x9fb6e6), 0.78, 0.35);
   rim.position.set(-1.6, 3.2, 4.6);
   scene.add(rim);
 
-  return { hemi, key, fill, rim };
+  /* The only warm light in the building, and the only one that does not go
+     down after dark. A clip lamp over the bench: tungsten, tight, aimed at
+     the top rather than at the pegboard, so it pools on the work surface
+     and dies before it reaches the holograms hanging above it. Those panes
+     are additive and unlit, so this cannot wash them out; what it does is
+     put a warm floor under them, which is what stops a blue pane over a
+     blue bench from reading as one flat blue object. */
+  const warm = rigLight(new THREE.SpotLight(0xffb36b), 8.0, 1.18);
+  warm.distance = 3.4; warm.angle = 0.62; warm.penumbra = 0.85; warm.decay = 2;
+  warm.position.set(2.72, 2.34, -0.60);
+  warm.target.position.set(3.30, 0.92, -0.60);
+  scene.add(warm);
+  scene.add(warm.target);
+
+  /* The one shadow caster, and it is an experiment that did not win: see
+     the SHADOWS note in main.js for what was measured. It stays wired so
+     ?shadow=1 can re-run it, and stays invisible otherwise, which costs a
+     scene-graph node and no shadow map at all.
+
+     It sits on the key's axis rather than somewhere of its own, because
+     two lights disagreeing about where the sun is reads as a mistake even
+     when neither one is wrong. These are the second tuning, the one that
+     was supposed to save it: narrowed from 0.85 to 0.62 and taken from 3.2
+     up to 6.5, on the theory that a shadow can only be as dark as the
+     light it subtracts is bright. It made the contact no better and the
+     room slightly brighter still, which is what settled the question. */
+  const cast = rigLight(new THREE.SpotLight(0xd9e4f8), 6.5, 0.16);
+  cast.distance = 9; cast.angle = 0.62; cast.penumbra = 0.5; cast.decay = 1.2;
+  cast.position.set(1.05, 2.88, 1.25);
+  cast.target.position.set(-0.28, 0, -0.55);
+  cast.castShadow = true;
+  cast.shadow.mapSize.set(2048, 2048);
+  cast.shadow.bias = -0.0005;
+  cast.shadow.normalBias = 0.02;   // the glTF has thin panels; bias alone acnes them
+  cast.shadow.camera.near = 0.6;
+  cast.shadow.camera.far = 9;
+  /* Off until the tier gate in main.js says otherwise. A shadow map is the
+     one thing here that a weak machine cannot afford, so the top tier owns
+     it, and every lower tier keeps the blobs it always had. */
+  cast.visible = false;
+  scene.add(cast);
+  scene.add(cast.target);
+
+  /* `rig` is what the loop eases. Anything pushed here is night-wired for
+     free; anything left out of it is a light that never turns off. */
+  return { hemi, key, fill, rim, warm, cast,
+           rig: [hemi, key, fill, rim, warm, cast] };
 }
 
 /* Blob shadow: one textured plane, no shadow map. Cheaper than a

@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { buildRoom, buildLights } from './scene.js';
-import { envTexture } from './paint.js';
+import { envTexture, loadFloorMaps } from './paint.js';
 import { loadCar } from './car.js';
 import * as Props from './props.js';
 import * as S from './screens.js';
@@ -15,6 +15,71 @@ import { CAR, PROJECTS, BAY_PROJECTS, PAPER, EXPERIENCE, EDUCATION, BIKE, DOG, P
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const coarse = matchMedia('(pointer: coarse)').matches;
 const portrait = innerHeight > innerWidth;
+
+const QUERY = new URLSearchParams(location.search);
+
+/* Where the perf ladder starts. checkPerf still owns every demotion from
+   here; this only picks the first rung, because handing a phone tier 3
+   means it renders one expensive second before the first window closes and
+   drops it anyway, and that second is the first one anybody sees.
+   ?q=high|med|low pins a tier instead, which is what makes a screenshot
+   reproducible: a pinned tier is never demoted. */
+const TIER_BY_NAME = { high: 3, med: 2, low: 1 };
+const FORCED_TIER = TIER_BY_NAME[QUERY.get('q')];
+const TIER_PINNED = FORCED_TIER != null;
+
+function startingTier() {
+  if (TIER_PINNED) return FORCED_TIER;
+  const cores = navigator.hardwareConcurrency || 4;
+  /* deviceMemory is Chromium-only, reports GB, and is capped at 8. Safari
+     does not implement it, so the 4 default is what an iPhone gets, which
+     is deliberately not low enough to drop it to the bottom rung on a
+     missing API alone. */
+  const mem = navigator.deviceMemory || 4;
+
+  // genuinely weak, whatever it is plugged into: plain path, no composer
+  if (cores <= 4 || mem <= 2) return 1;
+  /* A phone with real silicon can run the composer, but only at the 1.5
+     pixel-ratio cap tier 2 applies; a thin one should not try. Screen
+     density is not consulted here on purpose, because the tier's own DPR
+     cap already decides how many pixels get drawn, and a dense screen on
+     a fast chip was the one case the old rule got wrong. */
+  if (coarse) return (cores >= 6 && mem >= 4) ? 2 : 1;
+  return cores <= 6 ? 2 : 3;
+}
+
+/* The shadow experiment, run and lost. A single shadow-casting SpotLight
+   over the car was measured against the painted blob it had to beat, at
+   two tunings (wide and soft, then tight and bright), from identical
+   poses. It lost both times, and the numbers say why: turning it on made
+   the frame BRIGHTER and left FEWER dark pixels than the blob did.
+
+   That is not a bias problem and there was no acne to fight. It is that
+   this room is lit by a hemisphere, three directionals and a painted
+   environment, so one spot is maybe a quarter of what reaches the floor
+   beside the car; subtracting a quarter of a quarter is a whisper, while
+   the blob is a tuned 66% contact sitting exactly where the sills are.
+   The floor also already carries painted pools and a painted vignette, so
+   the real shadow lands on a surface that is graded before it arrives.
+
+   Left in and defaulted off rather than deleted, because the experiment is
+   worth being able to re-run: ?shadow=1 puts it back, top tier only. */
+const SHADOWS = QUERY.get('shadow') === '1';
+
+/* ?post=0 drops the composer at any tier, and ?post=null keeps the chain
+   but empties it of effects. That second one is the measurement that
+   matters: this room has fourteen materials carrying toneMapped:false, and
+   three stops applying the flag at all once a RenderPass is in front, so
+   Render -> Output on its own is not guaranteed to equal renderer.render.
+   Whatever that costs wants to be known before a bloom is laid on top of
+   it and told to explain the difference. */
+const POST_MODE = QUERY.get('post');   // null | '0' | 'null'
+
+/* ?pose=hero lands straight on the home station instead of walking in
+   through the door. The arrival is the better first impression and stays
+   the default; this exists because a screenshot of a two-second flight is
+   a screenshot of whichever frame the capture happened to land on. */
+const POSE = QUERY.get('pose');
 
 const $ = (s) => document.querySelector(s);
 const boot = $('.boot');
@@ -52,12 +117,30 @@ if (document.documentElement.classList.contains('has-gl')) {
 
 async function start() {
   const canvas = $('#stage');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  /* Decided before the renderer exists, because two things about the
+     renderer itself depend on it. */
+  const startTier = startingTier();
+
+  /* Canvas MSAA is only worth paying for on the plain path. From tier 2 up
+     the room is drawn into the composer's own multisampled target and the
+     backbuffer is never antialiased by this flag at all, so on those tiers
+     it buys nothing and costs a second multisampled surface at whatever
+     device pixel ratio the display has. Below tier 2 it is the only thing
+     keeping the door slats and the bench lip from crawling, so that is
+     exactly where it stays on. */
+  const renderer = new THREE.WebGLRenderer({
+    canvas, antialias: startTier < 2, powerPreference: 'high-performance',
+  });
+  renderer.setPixelRatio(startTier >= 3 ? Math.min(2, devicePixelRatio || 1)
+    : startTier === 2 ? Math.min(1.5, devicePixelRatio || 1) : 1);
   renderer.setSize(innerWidth, innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.06;
+  /* Soft, because the one shadow in this room is a three-metre strip light
+     and a hard edge under the sills would be a different building. Whether
+     the map is switched on at all is the tier gate's call. */
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070a);
@@ -90,6 +173,9 @@ async function start() {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight, false);
+    // the composer owns its own targets; left unresized they keep the old
+    // buffer and the room renders into a corner of the canvas
+    if (post) post.setSize(innerWidth, innerHeight);
     clearTimeout(resizeTimer);
     if (!wideViewport()) rig.shift = 0;
     resizeTimer = setTimeout(() => {
@@ -103,7 +189,47 @@ async function start() {
     setTimeout(() => dispatchEvent(new Event('resize')), 120);
   });
 
-  const room = buildRoom(scene);
+  /* The concrete maps, before the room rather than after it, because the
+     colour map is composited into the floor canvas and a floor built twice
+     is a floor that flashes. 243 KB for the three, against 6 MB of car.
+
+     Not downloaded at all on the bottom rung. A machine that is going to
+     be handed the plain render path should not first be made to fetch a
+     quarter of a megabyte of normal map for a slab it will barely shade,
+     and this is the only decision that has to be made before the perf
+     ladder exists, because by the time tier is read the room is built.
+
+     A failure here is not fatal either: the slab falls back to the
+     painted-only version it has always had, which is why this is a catch
+     and not an await that can reject the boot. */
+  /* The composer and the eleven vendored modules behind it are 55 KB that
+     the bottom rung will never run: the ladder only ever demotes, so a
+     machine that starts at tier 1 cannot later climb to a tier that wants
+     them. Imported dynamically so that machine never fetches them at all,
+     which is most of what "the low path stays light" has to mean when the
+     alternative is downloading a bloom pass in order not to use it. */
+  const Post = startTier >= 2 ? await import('./post.js') : null;
+
+  const floorMaps = startTier <= 1 ? null : await loadFloorMaps(
+    renderer.capabilities.getMaxAnisotropy()).catch((e) => {
+    console.warn('garage: concrete maps unavailable, painted floor only', e);
+    return null;
+  });
+
+  /* Texture detail follows the SCREEN, not just the tier. A good phone
+     earns tier 2 and can run the composer, but it is still a tiled GPU
+     behind a screen a few inches across, and a four-megapixel floor canvas
+     costs it sixteen megabytes to hold and a visible pause to paint for
+     detail it cannot resolve. Anisotropy is the same trade: nearly free on
+     a desktop GPU, pure bandwidth on a tiler, and the floor is the one
+     surface here seen at a grazing angle, so it keeps some of it. */
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  const lowDetail = startTier <= 1 || coarse;
+  const room = buildRoom(scene, {
+    floorMaps,
+    aniso: lowDetail ? Math.min(4, maxAniso) : maxAniso,
+    lowDetail,
+  });
   const lights = buildLights(scene);
   setProgress(0.10);
 
@@ -138,7 +264,7 @@ async function start() {
   const bike = Props.buildBike(scene);
   const exit = Props.buildExit(scene);
   const dressing = Props.buildDressing(scene);
-  Props.buildSign(scene, coarse);
+  Props.buildSign(scene, coarse, QUERY.get('sign') === 'two');
 
   /* ------------------------------------------------- ambient machines */
   /* A pup on patrol and an arm on the bench. Neither is clickable and
@@ -228,6 +354,49 @@ async function start() {
     }
   }
 
+  /* ------------------------------------------------------ hover glow */
+  /* What visibly answers when the pointer finds a hotspot. Most hitboxes
+     are invisible boxes, so brightening the box does nothing: each station
+     names the group its box stands in front of, and the whole group lifts
+     by a hair. A few hotspots ARE the drawn thing — the paper pinned to
+     the research wall — and those answer on their own.
+
+     Only MeshStandardMaterial is touched, which is exactly what keeps this
+     off the holograms, the LEDs, the eyes and the scan cone: those are
+     Basic and Shader materials with no emissive channel, and most of them
+     are already driven every frame by something that would fight a hover.
+
+     The car is deliberately absent. Its materials are finished, graded
+     work, and a hover tint is the one thing that would quietly regrade
+     them; it gets the cursor, which is the half that actually says
+     "clickable". */
+  const HOVER_GROUPS = {
+    bench: bench.group, wall: wall.group, dog: dog.group,
+    bike: bike.group, exit: exit.group,
+  };
+  for (const src of [bench, wall, dog, bike, exit]) {
+    for (const h of src.hotspots) {
+      // material.visible === false is how the invisible hitboxes are made
+      if (!HOVER_GROUPS[h.id] && h.mesh.material && h.mesh.material.visible !== false) {
+        HOVER_GROUPS[h.id] = h.mesh;
+      }
+    }
+  }
+  const HOVER_TINT = new THREE.Color(0x16243a);
+  function setHover(id, on) {
+    const node = id && HOVER_GROUPS[id];
+    if (!node) return;
+    node.traverse((o) => {
+      const m = o.material;
+      if (!m || Array.isArray(m) || !m.isMeshStandardMaterial) return;
+      // capture once: the base may already be a real emissive, and a hover
+      // must add to it rather than replace it
+      if (m.userData.emBase === undefined) m.userData.emBase = m.emissive.getHex();
+      m.emissive.setHex(m.userData.emBase);
+      if (on) m.emissive.add(HOVER_TINT);
+    });
+  }
+
   /* ------------------------------------------------------------ audio */
   const shop = new Shop();
 
@@ -246,6 +415,10 @@ async function start() {
   const plateCam = new THREE.Vector3();
   const plateAim = new THREE.Object3D();
   plateAim.up.set(0, 0, 1);              // the bay's own up, which is Z
+  /* Hover state. The bay owns the cursor whenever it is open and the
+     pointer is on a plate, because 'zoom-in' says something more specific
+     there than 'pointer' does; everywhere else the room says 'pointer'. */
+  let bayHot = false, hoverId = null, hoverTick = 0;
   let boardT = 0, boardPhase = -1, boardFlash = -1;
   let filmT = 0, filmN = -1;
   let dogPerk = 0, dogHop = 0;
@@ -518,6 +691,26 @@ async function start() {
     goto('bay');
   }
 
+  /* ------------------------------------------------------------- hud */
+  /* The hint is an instruction, and an instruction that has been followed
+     is furniture. It goes a beat and a half after the first drag rather
+     than on the first pixel of it, so it reads as confirmation instead of
+     as something that fled when you touched it. */
+  let hintGone = false, railTucked = false;
+  function retireHint() {
+    if (hintGone || !hint) return;
+    hintGone = true;
+    setTimeout(() => hint.classList.add('gone'), 1500);
+  }
+  /* The rail folds to its ticks once you have shown you can drive. Class
+     only: the buttons keep their text, their order and their focusability,
+     and CSS :focus-within opens it again for anyone arriving by keyboard. */
+  function tuckRail() {
+    if (railTucked || !rail) return;
+    railTucked = true;
+    rail.classList.add('tucked');
+  }
+
   /* -------------------------------------------------------- pointer */
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
@@ -533,10 +726,17 @@ async function start() {
     ndc.x = (e.clientX / innerWidth) * 2 - 1;
     ndc.y = -(e.clientY / innerHeight) * 2 + 1;
     pointerNdc.copy(ndc);
+    /* Once the hint has been retired, its corner stays live: coming back
+       to it brings it back. Cheap enough to do on every move — two
+       comparisons against a box, no layout read. */
+    if (hintGone) {
+      hint.classList.toggle(
+        'peek', e.clientX > innerWidth - 280 && e.clientY > innerHeight - 150);
+    }
     if (!down) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 6) dragging = true;
-    if (dragging) rig.orbit(dx, dy);
+    if (dragging) { rig.orbit(dx, dy); retireHint(); tuckRail(); }
     lastX = e.clientX; lastY = e.clientY;
   });
   canvas.addEventListener('pointerup', (e) => {
@@ -562,6 +762,8 @@ async function start() {
   }
 
   function handle(id) {
+    // clicking a thing in the room counts as knowing how to drive too
+    retireHint(); tuckRail();
     switch (id) {
       case 'horn': shop.horn(); flashPlate(); return;
       case 'lamp': lampsOn = !lampsOn; shop.click(0.22); return;
@@ -650,7 +852,67 @@ async function start() {
 
   /* ------------------------------------------------------- perf ladder */
   /* Never show a weak machine an ugly version, only a simpler pretty one. */
-  let tier = 3, frames = 0, windowStart = performance.now();
+  let tier = startTier, frames = 0, windowStart = performance.now();
+
+  /* What a tier COSTS lives here; when we drop a tier still lives in
+     checkPerf. One ladder: a second one that also decided which effects
+     were on would disagree with this one the first time either changed.
+     Written as "what is true at tier N" rather than as a list of things to
+     switch off on the way down, so starting at tier 1 and falling to tier 1
+     produce the same room. */
+  let post = null;
+  function applyTier() {
+    // the mirrored car under the slab, and the slab going transparent to
+    // show it: the most expensive thing in the room after the car itself
+    mirror.visible = tier >= 3;
+    room.floorMat.transparent = tier >= 3;
+    room.floorMat.opacity = tier >= 3 ? 0.90 : 1;
+    room.floorMat.needsUpdate = true;
+
+    /* Real shadow at the top only, and the car's painted blob steps aside
+       exactly when it lands: both at once reads as a double shadow, which
+       is worse than either alone. Every other prop keeps its blob. */
+    const wantShadow = tier >= 3 && SHADOWS;
+    if (renderer.shadowMap.enabled !== wantShadow) {
+      renderer.shadowMap.enabled = wantShadow;
+      // switching the map on changes every program, so they all recompile
+      scene.traverse((o) => {
+        if (o.isMesh && o.material && !Array.isArray(o.material)) o.material.needsUpdate = true;
+      });
+    }
+    lights.cast.visible = wantShadow;
+    car.shadow.visible = !wantShadow;
+
+    renderer.setPixelRatio(
+      tier >= 3 ? Math.min(2, devicePixelRatio || 1)
+        : tier === 2 ? Math.min(1.5, devicePixelRatio || 1)
+          : 1);
+
+    /* The composer from tier 2 up. Below that the plain path has to still
+       be a complete room, not a broken one: no composer means no bloom, so
+       the angel eyes are carried by their own additive coronas, which is
+       what they were built on before any of this existed. */
+    const wantPost = tier >= 2 && POST_MODE !== '0' && Post;
+    if (wantPost && !post) {
+      post = POST_MODE === 'null'
+        ? Post.buildPost(renderer, scene, camera, { bloom: false, vignette: false })
+        : Post.buildPost(renderer, scene, camera);
+    } else if (!wantPost && post) { post.dispose(); post = null; }
+    if (post) post.setSize(innerWidth, innerHeight);
+
+    // the strip tubes stay emissive, so the room still reads as lit
+    if (tier === 0) car.bay.bulb.intensity = 0.9;
+  }
+
+  /* The one place anything is drawn. grab() calls this too: the moment a
+     composer exists, a bare renderer.render is a different picture, and
+     every screenshot-based check on this machine would be verifying a
+     render path the site never uses. */
+  function render() {
+    if (post) post.render();
+    else renderer.render(scene, camera);
+  }
+
   function checkPerf(now) {
     frames++;
     if (now - windowStart < 4000) return;
@@ -662,18 +924,17 @@ async function start() {
     if (now - windowStart > 8000) { frames = 0; windowStart = now; return; }
     const fps = (frames * 1000) / (now - windowStart);
     frames = 0; windowStart = now;
-    if (fps < 40 && tier === 3) {
-      tier = 2; mirror.visible = false;
-      room.floorMat.transparent = false; room.floorMat.opacity = 1;
-    } else if (fps < 30 && tier === 2) {
-      tier = 1;
-    } else if (fps < 20 && tier === 1) {
-      tier = 0;
-      renderer.setPixelRatio(1);
-      car.bay.bulb.intensity = 0.9;
-      // the strip tubes stay emissive, so the room still reads as lit
-    }
+    // a tier asked for by hand is a tier we keep, or ?q= could not hold a
+    // screenshot still long enough to compare it with anything
+    if (TIER_PINNED) return;
+    const was = tier;
+    if (fps < 40 && tier === 3) tier = 2;
+    else if (fps < 30 && tier === 2) tier = 1;
+    else if (fps < 20 && tier === 1) tier = 0;
+    if (tier !== was) applyTier();
   }
+
+  applyTier();
 
   /* --------------------------------------------------------- the loop */
   let last = performance.now();
@@ -708,14 +969,18 @@ async function start() {
     }
 
     // night mode: the acceptable version of "the room changes"
+    /* Every rig light eases toward its own pair of numbers, which live on
+       the light itself in scene.js rather than being typed again here. The
+       rim is the light through the door opening, so it goes down with the
+       rest; left undimmed it became the brightest thing in the room after
+       dark. The bench tungsten is the one that goes UP: after the ceiling
+       is out it is the only light left, and the room should read as one
+       warm island rather than as the same room with the gain pulled. */
     const nk = 1 - Math.pow(0.004, dt);
-    const want = nightMode ? 0.16 : 1;
-    lights.key.intensity += (2.05 * want - lights.key.intensity) * nk;
-    lights.hemi.intensity += (0.85 * (nightMode ? 0.3 : 1) - lights.hemi.intensity) * nk;
-    lights.fill.intensity += (0.75 * (nightMode ? 0.55 : 1) - lights.fill.intensity) * nk;
-    // the rim is the light through the door opening, so it goes with them;
-    // left undimmed it became the brightest thing in the room after dark
-    lights.rim.intensity += (0.62 * (nightMode ? 0.35 : 1) - lights.rim.intensity) * nk;
+    for (const l of lights.rig) {
+      const b = l.userData;
+      l.intensity += (b.base * (nightMode ? b.night : 1) - l.intensity) * nk;
+    }
     for (const s of room.strips) {
       const c = nightMode ? 0.09 : 1;
       s.tube.color.setRGB(0.874 * c + 0.02, 0.914 * c + 0.02, 1 * c + 0.02);
@@ -724,6 +989,7 @@ async function start() {
 
     /* The driveway loop on the airbox lid. Only while the bay is actually
        open, and held on its first frame under reduced motion. */
+    bayHot = false;      // the bay only claims the cursor while it is open
     if (car.bay.group.visible) {
       car.bay.miniStep(reduced ? 0 : clock.t);
 
@@ -770,7 +1036,7 @@ async function start() {
         pl.group.scale.setScalar(1 + k * 0.75);
         pl.face.material.color.setRGB(0.737 + k * 0.263, 0.812 + k * 0.188, 0.925 + k * 0.075);
       }
-      canvas.style.cursor = hot ? 'zoom-in' : '';
+      bayHot = !!hot;
     }
 
     if (tier >= 2) dressing.blades.rotation.z -= dt * 7.4;
@@ -796,6 +1062,24 @@ async function start() {
     camera.getWorldDirection(viewDir);
     lookPlane.setFromNormalAndCoplanarPoint(viewDir.negate(), headWorld);
     lookRay.setFromCamera(pointerNdc, camera);
+
+    /* Hover affordance, riding the ray Iron Bark's look-at just set from
+       the pointer. A second raycast on pointermove would fire far more
+       often than this and tell us the same thing: the pointer moves in
+       bursts of a hundred events, the room only needs to know once a
+       frame. Every third frame is still faster than anyone can notice a
+       cursor change, and it keeps twenty box intersects off the other two.
+       intersectPlane below does not mutate the ray, so this is free. */
+    if (!(hoverTick = (hoverTick + 1) % 3) && !buttonsLocked) {
+      const h = lookRay.intersectObjects(targets, false)[0];
+      const id = h ? h.object.userData.hit : null;
+      if (id !== hoverId) {
+        setHover(hoverId, false);
+        hoverId = id;
+        setHover(hoverId, true);
+      }
+    }
+    canvas.style.cursor = bayHot ? 'zoom-in' : (hoverId ? 'pointer' : '');
     let yaw = 0, pitchTgt = 0, near = 0;
     if (lookRay.ray.intersectPlane(lookPlane, lookAt)) {
       near = THREE.MathUtils.clamp(1 - lookAt.distanceTo(headWorld) / 1.1, 0, 1);
@@ -1213,7 +1497,7 @@ async function start() {
     drone.scan.root.visible = tier >= 2 && !reduced;
 
     rig.update(dt, now);
-    renderer.render(scene, camera);
+    render();
     checkPerf(now);
   }
 
@@ -1247,7 +1531,7 @@ async function start() {
     };
     lift();
 
-    if (reduced) {
+    if (reduced || POSE === 'hero') {
       rig.jumpTo('home');
       mode = 'home';
     } else {
@@ -1303,9 +1587,11 @@ async function start() {
     /* Read the drawing buffer straight back. Headless compositors on this
        machine hand out stale frames; this cannot. */
     grab(type) {
-      renderer.render(scene, camera);
+      render();
       return renderer.domElement.toDataURL(type || 'image/png', 0.93);
     },
+    get post() { return post; },
+    setTier(t) { tier = t; applyTier(); },
     ready: true,
   };
 

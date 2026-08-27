@@ -12,14 +12,33 @@ const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 /* Cages: azimuth 0 looks from the door end, +PI/2 from the right wall. */
 export const POI = {
   /* Arrival is from the driveway, looking in through the open door. */
+  /* Brought in, and NOT swung round, because the door will not allow it.
+     This station stands on the driveway looking in, and the camera's x is
+     target.x + dist*sin(pol)*sin(az), so azimuth walks it sideways across
+     the opening. The opening is 4.9 wide, its right edge at x = 2.45, and
+     at az 0.52 with dist 5.9 the eye lands at x = 2.59: outside the hole,
+     with the jamb across a third of the frame and the signboard cropped.
+     Tried it, photographed it, put it back.
+
+     So azimuth here is pinned near 0.42 by the building, which is why the
+     original 0.40 was where it was. What is left to win is distance and
+     eye height: 6.05 fills more of the frame than 6.40 did, and the eye
+     comes up a little, which drops the sign clear of the top edge and puts
+     the far sill on the horizon instead of below it. The three-quarter
+     that az was reaching for lives at the `car` station, where there is no
+     doorway in the way and the orbit is uncaged. */
   home: {
-    target: [-0.34, 0.78, -0.10], az: 0.40, pol: 1.42, dist: 6.40,
+    target: [-0.33, 0.76, -0.02], az: 0.42, pol: 1.43, dist: 6.05,
     cage: { az: [-0.30, 1.02], pol: [1.22, 1.54], dist: [5.00, 7.20] },
     label: 'The garage',
   },
-  /* Inside, walking round the car: this is where the orbit opens up. */
+  /* Inside, walking round the car: this is where the orbit opens up.
+     Was az 1.05, which is very nearly broadside and flattens an E46 into
+     a door card. 0.74 is the three-quarter the car was designed to be
+     looked at from, and it keeps the front arch and the rear haunch in the
+     same frame. Orbit is uncaged here, so this is only where you arrive. */
   car: {
-    target: [-0.30, 0.68, -0.15], az: 1.05, pol: 1.34, dist: 4.10,
+    target: [-0.30, 0.70, -0.15], az: 0.74, pol: 1.31, dist: 4.25,
     cage: { az: null, pol: [1.06, 1.48], dist: [3.20, 4.70] },
     label: 'Carbeetle',
   },
