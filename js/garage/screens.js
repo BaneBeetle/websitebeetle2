@@ -505,7 +505,7 @@ export function holoCapture(p, img) {
     for (let yy = fy; yy < fy + fh; yy += 3) x.fillRect(fx, yy, fw, 1);
     x.globalCompositeOperation = 'destination-out';
     // down to a projection...
-    x.fillStyle = 'rgba(0,0,0,0.78)'; x.fillRect(fx, fy, fw, fh);
+    x.fillStyle = 'rgba(0,0,0,0.68)'; x.fillRect(fx, fy, fw, fh);
     // ...and no hard border on it either: a projected frame dies at its edges
     const vg = x.createRadialGradient(
       fx + fw / 2, fy + fh / 2, fh * 0.22,
@@ -574,12 +574,12 @@ export function holoDiag(p) {
   // the dyno sheet, which is the one number a car person looks for
   const res = CAR.specs.find((s) => s.k === 'Result');
   if (res) {
-    const n = res.v.replace(/\s*hp$/i, '');
+    const n = res.v.replace(/\s*w?hp$/i, '');
     y += 14;
     P.line(x, 'dyno result', { font: P.fonts.mono, size: 13, color: P.HOLO_DIM, x: 28, y: y + 6, track: 3, upper: true });
     P.line(x, n, { font: P.fonts.mono, size: 42, weight: 700, color: P.HOLO_HI, x: 28, y: y + 54 });
     x.font = `700 42px ${P.fonts.mono}`;
-    P.line(x, 'HP', { font: P.fonts.mono, size: 17, color: P.HOLO, x: 32 + x.measureText(n).width, y: y + 54, track: 2 });
+    P.line(x, 'WHP', { font: P.fonts.mono, size: 17, color: P.HOLO, x: 32 + x.measureText(n).width, y: y + 54, track: 2 });
     P.line(x, CAR.paint, { font: P.fonts.mono, size: 13, color: P.HOLO_MID, x: DW - 28, y: y + 54, align: 'right', track: 2, upper: true });
     y += 76;
   }

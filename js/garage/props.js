@@ -235,6 +235,70 @@ const HOLO_EYE = [1.36, 1.36, -0.38];
 const HOLO_PHI = 1.849;
 const GHOST_LEN = 0.55;
 
+/* Where the turntable sits, measured rather than judged. The first cut put
+   the ghost at dPhi 0.080, which read fine from the parked view and was
+   wrong everywhere else: projected against the diagnostics sheet it
+   crossed the pane at every one of 210 sampled cage poses, with up to 71%
+   of the wireframe's own vertices on the readout and the nose through the
+   DIAGNOSTICS header.
+   Solved by sweeping the ghost's projected hull against each pane's
+   projected quad over the whole cage. Two things the first attempt at
+   this got wrong. The fix is sideways, not upward: lifting the ghost
+   clear of the sheet's top needs about 0.27m and puts it out of frame,
+   while swinging it round the arc into the empty band left of the sheet
+   and above the browser costs nothing. And the turntable turns, so one
+   frame proves nothing: a placement that was clear at the yaw it happened
+   to be sampled at still grazed the browser pane a third of a revolution
+   later. These numbers are the worst case over twelve turntable angles as
+   well as over the cage, panel open and closed.
+   At dPhi 0.360, r 1.760, y 1.820 the ghost never touches any of the
+   three panes at any sampled pose or angle: 0.019 of NDC daylight to the
+   diagnostics sheet at worst, 0.029 to the browser, 0.27 to the capture,
+   and it keeps its full size. Its roof reaches 0.969 of the frame at the
+   parked view, which is tight but stable: three.js holds vertical FOV
+   across aspect ratios, so a wider or narrower window does not push it
+   any closer to the top. The panes themselves do not move at all, so
+   none of this is paid for out of the panel-open budget. */
+const GHOST = { dPhi: 0.360, r: 1.760, y: 1.820, spin: 0.5 };
+const GHOST_POOL_DROP = 0.085;      // the light pool sits under the turntable
+
+/* Where the light comes from. A projection with no source is a decal, so
+   every sheet in the arc gets one and you can see the throw leave it.
+   The puck is the one the bench already builds at the old monitor's foot,
+   and it takes the turntable, which hangs more or less over it. The three
+   nubs are new and small, one per pane, set along the front lip of the
+   bench top: forking all four throws out of the single puck drew a
+   starburst, which is a lightshow, while a source under each sheet reads
+   as an array of instruments. The lip is x 2.98 at the near edge and the
+   top is y 0.92, which is where these numbers come from; the z values are
+   each pane's own, pulled apart where two panes share a bearing so two
+   nubs never sit on top of each other. All of them are well clear of the
+   arm's end of the bench. */
+const DESK_Y = 0.92;
+const EMIT = [X1 - 0.30, DESK_Y + 0.041, -0.86];        // the existing puck
+const NUBS = {
+  browser: [X1 - 0.58, DESK_Y + 0.026, -1.14],
+  diag:    [X1 - 0.58, DESK_Y + 0.026, -0.70],
+  capture: [X1 - 0.58, DESK_Y + 0.026, -0.46],
+};
+
+/* A throw of light from a source to the thing it draws. The cone is a
+   unit with its apex on the local origin opening down its own -Y, so
+   aiming one is a single rotation of -Y onto the direction and a single
+   scale onto the distance: no Euler order to get wrong, and the texture's
+   own falloff always runs from the lens outward whichever way it points. */
+function holoThrow(mat, from, to, spread) {
+  const g = new THREE.ConeGeometry(1, 1, 14, 1, true);
+  g.translate(0, -0.5, 0);
+  const m = new THREE.Mesh(g, mat);
+  const dir = new THREE.Vector3(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const len = dir.length();
+  m.position.set(from[0], from[1], from[2]);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.normalize());
+  m.scale.set(spread, len, spread);
+  return m;
+}
+
 /* dPhi swings a pane round the arc, r pushes it out from the eye, y is
    plain height. Three panes at three sizes with one clearly dominant: a
    row of equal rectangles would read as a menu, and this is meant to
@@ -322,7 +386,7 @@ function buildHoloDesk(parent, hotspots, { ghost: ghostGeo = null, reduced = fal
     // get the same material so a project change reads as one gesture
     const first = spec.id === 'browser' ? idle : WING[spec.id](null, null);
     const second = spec.id === 'browser' ? index : first;
-    const mat = S.holoScreenMaterial(first, second, { alpha: spec.id === 'browser' ? 1 : 0.88 });
+    const mat = S.holoScreenMaterial(first, second, { alpha: spec.id === 'browser' ? 1 : 0.96 });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(spec.w, spec.h), mat);
     holoPlace(mesh, spec.dPhi, spec.r, spec.y);
     mesh.rotation.z = spec.rz;
@@ -357,8 +421,8 @@ function buildHoloDesk(parent, hotspots, { ghost: ghostGeo = null, reduced = fal
   /* the turntable, above and a little to the near side of the browser so
      it never sits on top of what you are reading */
   const ghost = buildGhost(ghostGeo);
-  holoPlace(ghost.group, 0.080, 1.636, 1.725);
-  ghost.group.rotation.y += 0.5;
+  holoPlace(ghost.group, GHOST.dPhi, GHOST.r, GHOST.y);
+  ghost.group.rotation.y += GHOST.spin;
   group.add(ghost.group);
 
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.66), new THREE.MeshBasicMaterial({
@@ -366,9 +430,73 @@ function buildHoloDesk(parent, hotspots, { ghost: ghostGeo = null, reduced = fal
     blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
   }));
   pool.rotation.x = -Math.PI / 2;
-  pool.position.copy(ghost.group.position).setY(1.640);
+  pool.position.copy(ghost.group.position).setY(GHOST.y - GHOST_POOL_DROP);
   pool.renderOrder = 10;
   group.add(pool);
+
+  /* ---- the throws -------------------------------------------------- */
+
+  /* The projection, sold. Each sheet gets a beam up from its own nub and
+     the turntable gets one from the puck. The wings share a material so
+     the array breathes on one number; the turntable's is a clone of it a
+     stop up, driven off the same flicker.
+     They sit at renderOrder 4, under the panes' own bloom at 5 and well
+     under the panes at 10-12: a throw belongs behind what it draws. But
+     the order is documentation, not protection. Additive light is
+     commutative, so drawing a beam first does nothing to stop it adding
+     onto a pane it crosses; only never arriving does, which is why the
+     brightness is low and the texture is dead about two thirds of the
+     way along. That is what actually keeps the type clean. */
+  const BEAM_BASE = 0.17;
+  const GHOST_BEAM_GAIN = 1.7;
+  const beamMat = new THREE.MeshBasicMaterial({
+    map: P.holoBeamTexture(), transparent: true, opacity: BEAM_BASE,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide, toneMapped: false,
+  });
+  const beams = new THREE.Group();
+  beams.name = 'holo-beams';
+  group.add(beams);
+
+  /* A nub is a pea of machined aluminium with a lit face, the same
+     hardware grammar as the puck at a tenth the size. Without it the beam
+     starts out of bare MDF. */
+  for (const spec of PANES) {
+    const at = NUBS[spec.id];
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.012, 10), ALU());
+    body.position.set(at[0], at[1], at[2]);
+    group.add(body);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.010, 10), new THREE.MeshBasicMaterial({
+      color: 0x9fc6ff, transparent: true, opacity: 0.9, toneMapped: false,
+    }));
+    lens.rotation.x = -Math.PI / 2;
+    lens.position.set(at[0], at[1] + 0.007, at[2]);
+    group.add(lens);
+
+    /* Aimed at the sheet's own centre, and narrower than the sheet is
+       wide: a cone as wide as the pane reads as a wash sitting on it
+       rather than as the throw that put it there. */
+    const t = panes[spec.id].mesh.position;
+    const beam = holoThrow(beamMat, [at[0], at[1] + 0.012, at[2]],
+                           [t.x, t.y, t.z], spec.w * 0.20);
+    beam.renderOrder = 4;
+    beams.add(beam);
+  }
+
+  /* And the turntable's own, off the puck the bench already has. It gets
+     its own material a stop up because it is the longest throw in the set
+     and the one carrying the thing that most obviously hangs off nothing:
+     at the wings' brightness it read as a smudge rather than as a source.
+     Its line does pass behind the browser pane about three fifths of the
+     way along, which is exactly why the texture is dead by two thirds:
+     what crosses the sheet is already nothing. */
+  const gp = ghost.group.position;
+  const gBeamMat = beamMat.clone();
+  gBeamMat.opacity = BEAM_BASE * GHOST_BEAM_GAIN;
+  const gBeam = holoThrow(gBeamMat, [EMIT[0], EMIT[1] + 0.014, EMIT[2]],
+                          [gp.x, gp.y, gp.z], 0.085);
+  gBeam.renderOrder = 4;
+  beams.add(gBeam);
 
   /* what the arc spills onto the bench top. A pane that lights nothing
      is a decal; this is the difference between the two. */
@@ -439,19 +567,39 @@ function buildHoloDesk(parent, hotspots, { ghost: ghostGeo = null, reduced = fal
     }
     if (!animate) {
       // dropping a tier mid-session must not leave a pane parked at
-      // whatever drift it happened to be carrying that frame
+      // whatever drift it happened to be carrying that frame, nor the
+      // throws parked mid-flicker
       for (const pane of list) {
         pane.mesh.position.y = pane.baseY;
         pane.mesh.rotation.z = pane.baseRz;
       }
+      beamMat.opacity = BEAM_BASE;
+      gBeamMat.opacity = BEAM_BASE * GHOST_BEAM_GAIN;
+      /* step() stops animating for two different reasons and they do not
+         want the same answer. Under reduced motion the throws stay lit
+         and hold still, the way the panes beside them do: they are
+         scenery, and the ask is only that nothing moves. A dropped tier
+         is the other reason, and that one is about cost, so there they
+         come off entirely - four additive cones is overdraw a machine
+         already missing frames should not be paying for. */
+      beams.visible = reduced;
       return;
     }
+    beams.visible = true;
     for (const pane of list) {
       pane.mesh.position.y = pane.baseY + Math.sin(t * pane.rate + pane.phase) * 0.005;
       pane.mesh.rotation.z = pane.baseRz + Math.sin(t * pane.rate * 0.7 + pane.phase) * 0.004;
     }
     if (ghost.spin) ghost.spin.rotation.y = t * 0.34;
     pool.material.opacity = 0.20 + 0.03 * Math.sin(t * 1.4);
+    /* The throws flicker on the rate the panes already breathe at, which
+       is 1.9 in the pane shader, so the array reads as one instrument
+       rather than as a beam effect bolted beside a screen effect. The
+       second rate is not a multiple of the first, so it never settles
+       into a loop you can count. */
+    const flick = 0.86 + 0.10 * Math.sin(t * 1.9) + 0.05 * Math.sin(t * 0.77);
+    beamMat.opacity = BEAM_BASE * flick;
+    gBeamMat.opacity = BEAM_BASE * GHOST_BEAM_GAIN * flick;
   }
 
   return { group, browser: panes.browser.mesh, screenMat: panes.browser.mat, idle, index, ghost, sync, step };

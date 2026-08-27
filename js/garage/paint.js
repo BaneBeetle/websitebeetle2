@@ -319,16 +319,16 @@ export function glowTexture(color = '#cfe0ff', mid = '150,180,240', edge = '120,
    steps is enough, and holding to four is what keeps a dense pane from
    turning into confetti. */
 export const HOLO_HI = '#e4f2ff';    // the one thing per pane you must read
-export const HOLO = '#a8ccff';       // the workhorse
-export const HOLO_MID = '#6f9edb';   // supporting text, dense tiers
-export const HOLO_DIM = '#3d6ba6';   // rules, brackets, anything inactive
+export const HOLO = '#b4d2ff';       // the workhorse
+export const HOLO_MID = '#89b4e8';   // supporting text, dense tiers
+export const HOLO_DIM = '#5786c0';   // rules, brackets, anything inactive
 
 /* The pane itself: a whisper of fill so the glass has presence, the
    scanlines that say it is being drawn rather than printed, and corner
    brackets at a fixed inset. The brackets are the reason four panes of
    four different sizes read as one instrument, so the inset and the tick
    never scale with the canvas. */
-export function holoFrame(x, w, h, { wash = 0.022, scan = 0.042, dim = HOLO_DIM } = {}) {
+export function holoFrame(x, w, h, { wash = 0.034, scan = 0.050, dim = HOLO_DIM } = {}) {
   const g = x.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0.00, `rgba(122,167,255,${wash})`);
   g.addColorStop(0.58, `rgba(122,167,255,${wash * 0.3})`);
@@ -612,4 +612,58 @@ export function carEnvTexture() {
   const t = toTexture(c, { srgb: false });
   t.mapping = THREE.EquirectangularReflectionMapping;
   return t;
+}
+
+/* ---- the workbench projectors -------------------------------------- */
+
+/* What a projector actually looks like in air: brightest just off the
+   lens and gone before it lands. The beam must die before it reaches the
+   sheet it is drawing, because an additive throw that arrives adds its
+   own brightness straight onto the text, and washing the type is the one
+   thing a beam in this corner must never do. Letting the pane do its own
+   landing is also the honest reading: you see the light leave, and you
+   see what it drew, and nothing in between insists on the join.
+
+   Mixed from HOLO and HOLO_HI and nothing else, the same two-brightness
+   rule the drone's scan holds itself to, so the corner keeps one hue. */
+export function holoBeamTexture() {
+  const { c, x, w, h } = canvas(64, 128);
+  x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+  /* The apex samples the TOP of this canvas. A three.js cone carries
+     uv.y = 1 at its apex and 0 at its base, and CanvasTexture uploads
+     flipped, so v = 1 reads row 0. Checked against the geometry rather
+     than assumed: the beam has to run bright-to-dark from the lens
+     outward, and getting this backwards draws four throws that are
+     brightest where they land. */
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.00, rgba(HOLO_HI, 0.10));   // a soft lens, not a point
+  g.addColorStop(0.06, rgba(HOLO_HI, 0.17));
+  g.addColorStop(0.16, rgba(HOLO, 0.10));
+  g.addColorStop(0.34, rgba(HOLO, 0.038));
+  g.addColorStop(0.55, rgba(HOLO, 0.009));
+  g.addColorStop(0.70, rgba(HOLO, 0));         // dead well short of the pane
+  g.addColorStop(1.00, rgba(HOLO, 0));
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+
+  /* Four ribs. A smooth wedge that flickers looks like nothing flickering
+     at all; the ribs are the grain that makes the throw legible as light
+     rather than as a tinted triangle. */
+  x.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) {
+    const cx = (i + 0.5) * (w / 4);
+    const s = x.createLinearGradient(cx - 4, 0, cx + 4, 0);
+    s.addColorStop(0, rgba(HOLO_HI, 0));
+    s.addColorStop(0.5, rgba(HOLO_HI, 0.085));
+    s.addColorStop(1, rgba(HOLO_HI, 0));
+    x.fillStyle = s; x.fillRect(cx - 4, 0, 8, h);
+  }
+  // the ribs have to die with the beam rather than outlive it
+  const fade = x.createLinearGradient(0, 0, 0, h);
+  fade.addColorStop(0.00, 'rgba(0,0,0,1)');
+  fade.addColorStop(0.30, 'rgba(0,0,0,0.50)');
+  fade.addColorStop(0.66, 'rgba(0,0,0,0)');
+  fade.addColorStop(1.00, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in';
+  x.fillStyle = fade; x.fillRect(0, 0, w, h);
+  return toTexture(c, { srgb: false });
 }
