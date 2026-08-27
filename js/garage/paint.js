@@ -116,23 +116,65 @@ export function envTexture() {
 
 /* Sealed concrete with painted light pools, a parking box, and floor
    stencils. The stencils are the menu: the room tells you where to go
-   instead of a nav bar doing it. */
-export function floorTexture(stencils) {
-  const S = 2048;
+   instead of a nav bar doing it.
+
+   Order matters and is the whole reason this is one canvas rather than a
+   stack of maps: the photographed slab goes down first, then everything
+   the room needs to SAY is painted on top of it. Wayfinding under grain
+   would be wayfinding you cannot read. */
+export function floorTexture(stencils, concrete = null, lowDetail = false) {
+  /* 2048 square is four megapixels of canvas to paint at boot and 16 MB of
+     texture to hold, for one plane. On a phone that is the single most
+     expensive thing here after the car, and it is being viewed on a screen
+     that cannot resolve it: half the size costs a quarter of both. Every
+     radius and stroke below is scaled by k so the slab looks the same at
+     either resolution rather than growing coarser grain. */
+  const S = lowDetail ? 1024 : 2048;
+  const k = S / 2048;
   const { c, x, w, h } = canvas(S, S);
   x.fillStyle = '#171b21'; x.fillRect(0, 0, w, h);
 
-  // concrete mottle
-  for (let i = 0; i < 5200; i++) {
-    const r = 2 + Math.random() * 26;
-    x.fillStyle = `rgba(${Math.random() < .5 ? '255,255,255' : '0,0,0'},${0.010 + Math.random() * 0.022})`;
-    x.beginPath(); x.arc(Math.random() * w, Math.random() * h, r, 0, 6.284); x.fill();
+  /* The scan, tiled four across so a 1K map lands near 280 px per metre on
+     a 7.2 m slab instead of 140. Overlay rather than a straight draw: it
+     is a daylight photograph of grey concrete and this is a night garage,
+     so composited normally it dragged the entire room a flat warm grey.
+     Overlay keeps the base colour and takes only the structure. */
+  if (concrete) {
+    x.save();
+    x.globalAlpha = 0.62;
+    x.globalCompositeOperation = 'overlay';
+    const t = w / 4;
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) x.drawImage(concrete, i * t, j * t, t, t);
+    }
+    x.restore();
   }
-  // control joints
-  x.strokeStyle = 'rgba(0,0,0,0.42)'; x.lineWidth = 4;
+
+  /* Concrete mottle, from a fixed seed so the slab is the same slab twice.
+     The count scales with area, not with taste: 5200 arcs over a quarter
+     of the pixels would be four times the density, which is a different
+     floor, and it would spend the boot time this is meant to save. */
+  const rnd = seeded(0x0c0c4e7e);
+  const grains = Math.round(5200 * k * k);
+  for (let i = 0; i < grains; i++) {
+    const r = (2 + rnd() * 26) * k;
+    x.fillStyle = `rgba(${rnd() < .5 ? '255,255,255' : '0,0,0'},${0.010 + rnd() * 0.022})`;
+    x.beginPath(); x.arc(rnd() * w, rnd() * h, r, 0, 6.284); x.fill();
+  }
+
+  /* Expansion joints. A slab this size is poured in bays, and the joints
+     are the only thing in the room that states its size: without them the
+     floor is an unmeasurable plane and the car has nothing to be four and
+     a half metres long against. Cut dark with a lit upper lip, because a
+     sawn joint is a groove, and a groove catches the ceiling on one edge. */
   for (const p of [0.333, 0.666]) {
+    const lip = Math.max(1, 3 * k);
+    x.strokeStyle = 'rgba(0,0,0,0.46)'; x.lineWidth = Math.max(2, 5 * k);
     x.beginPath(); x.moveTo(p * w, 0); x.lineTo(p * w, h); x.stroke();
     x.beginPath(); x.moveTo(0, p * h); x.lineTo(w, p * h); x.stroke();
+    x.strokeStyle = 'rgba(188,205,232,0.085)'; x.lineWidth = Math.max(1, 2 * k);
+    x.beginPath(); x.moveTo(p * w + lip, 0); x.lineTo(p * w + lip, h); x.stroke();
+    x.beginPath(); x.moveTo(0, p * h + lip); x.lineTo(w, p * h + lip); x.stroke();
   }
 
   // light pools, painted not computed
@@ -156,8 +198,8 @@ export function floorTexture(stencils) {
   // parking box, worn
   x.save();
   x.globalAlpha = 0.5;
-  x.strokeStyle = '#d8c26a'; x.lineWidth = 9;
-  x.setLineDash([90, 26]);
+  x.strokeStyle = '#d8c26a'; x.lineWidth = Math.max(3, 9 * k);
+  x.setLineDash([90 * k, 26 * k]);
   x.strokeRect(w * 0.30, h * 0.24, w * 0.40, h * 0.53);
   x.restore();
 
@@ -168,7 +210,7 @@ export function floorTexture(stencils) {
     x.save();
     x.translate(s.u * w, s.v * h);
     x.rotate((s.rot || 0) * Math.PI / 180);
-    line(x, s.text, { font: FONT_D, size: s.size || 40, color: '#c9d4e6', align: 'center', track: 5, upper: true });
+    line(x, s.text, { font: FONT_D, size: (s.size || 40) * k, color: '#c9d4e6', align: 'center', track: 5 * k, upper: true });
     x.restore();
   }
   x.restore();
@@ -182,12 +224,13 @@ export function wallTexture(tint = '#1c212a') {
   const { c, x, w, h } = canvas(1024, 512);
   x.fillStyle = tint; x.fillRect(0, 0, w, h);
   // painted breeze block: courses of blocks with mortar lines
+  const rnd = seeded(0xb10c4b1e);
   const rows = 10, cols = 10, bh = h / rows, bw = w / cols;
   for (let r = 0; r < rows; r++) {
     for (let cI = 0; cI < cols; cI++) {
       const off = (r % 2) * bw * 0.5;
       const px = cI * bw + off - bw, py = r * bh;
-      x.fillStyle = `rgba(${Math.random() < .5 ? '255,255,255' : '0,0,0'},${0.012 + Math.random() * 0.026})`;
+      x.fillStyle = `rgba(${rnd() < .5 ? '255,255,255' : '0,0,0'},${0.012 + rnd() * 0.026})`;
       x.fillRect(px + 3, py + 3, bw - 6, bh - 6);
     }
     x.strokeStyle = 'rgba(0,0,0,0.30)'; x.lineWidth = 3;
@@ -666,4 +709,63 @@ export function holoBeamTexture() {
   x.globalCompositeOperation = 'destination-in';
   x.fillStyle = fade; x.fillRect(0, 0, w, h);
   return toTexture(c, { srgb: false });
+}
+
+/* ---- deterministic grain ------------------------------------------ */
+
+/* Every mottled surface in this room wants noise, and until now took it
+   from Math.random(). That gives a different room on every load, which is
+   fine to look at and useless to verify: two screenshots of the same build
+   never match, so a pixel comparison cannot tell a real regression from
+   fresh concrete. Same seed, same grain, same room, every time.
+   mulberry32: one multiply-xor round, no state beyond a uint32. */
+export function seeded(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---- concrete ------------------------------------------------------ */
+
+/* The floor is the surface you look across for the entire visit, and a
+   painted canvas alone cannot give it a specular response: the old slab
+   was uniformly rough, so it stayed matte at every angle and read as grey
+   paper with shapes on it. These are ambientCG's Concrete034 maps, CC0,
+   re-encoded down to 243 KB for all three.
+
+   The colour map comes back as an Image rather than a Texture on purpose:
+   floorTexture has to composite it, because the stencils, the light pools
+   and the parking box all have to sit ON the concrete and they are painted
+   into the same canvas. Normal and roughness tile on their own at their
+   own repeat, so those come back as textures.
+
+   CC0 is public domain and carries no attribution requirement. The credit
+   line in the About panel is for the car glTF and is untouched. */
+export function loadFloorMaps(aniso = 8) {
+  const img = (url) => new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('floor map: ' + url));
+    i.src = url;
+  });
+  const tex = (url) => new Promise((res, rej) => {
+    new THREE.TextureLoader().load(url, (t) => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      /* four tiles across a 7.2 m slab is about 1.8 m of concrete per
+         tile: close enough that the grain has a real size, far enough
+         that the repeat does not read as a checkerboard from the door. */
+      t.repeat.set(4, 4);
+      t.anisotropy = aniso;
+      res(t);
+    }, undefined, () => rej(new Error('floor map: ' + url)));
+  });
+  return Promise.all([
+    img('img/tex/concrete-color.jpg'),
+    tex('img/tex/concrete-normal.jpg'),
+    tex('img/tex/concrete-rough.jpg'),
+  ]).then(([color, normal, rough]) => ({ color, normal, rough }));
 }

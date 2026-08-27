@@ -204,6 +204,22 @@ body:not(.gl-on) .hud{display:none}
 }
 .hint b{color:var(--ink-2);font-weight:400}
 body.deep .hint{opacity:0}
+/* Retired once you have actually dragged: the instruction has been
+   followed, so it stops being instruction and starts being furniture.
+   It comes back when the pointer returns to its corner, because the one
+   person who needs it twice is the person who forgot it. */
+.hint.gone{opacity:0}
+.hint.gone.peek{opacity:1}
+
+/* The rail tucks to a column of ticks after the first interaction. The
+   buttons keep their text and their place in the DOM - this clips them,
+   it does not hide them - so the tab order, the accessible names and the
+   screen-reader reading of the nav are all exactly what they were.
+   :focus-within is the half that matters: a keyboard user tabbing in
+   opens the rail without ever having hovered anything. */
+.rail button{max-width:240px;overflow:hidden;white-space:nowrap;transition:color .15s var(--ease),max-width .28s var(--ease)}
+.rail.tucked button{max-width:22px;padding-right:0}
+.rail.tucked:hover button,.rail.tucked:focus-within button{max-width:240px}
 
 /* --------------------------------------------------------------- panel */
 /* Real selectable HTML for whatever the camera is looking at. The 3D
@@ -411,6 +427,11 @@ body.deep .hint{opacity:0}
   .rail::-webkit-scrollbar{display:none}
   .rail button{padding:15px 14px;white-space:nowrap;font-size:10.5px}
   .rail button::before{display:none}
+  /* Down here the rail is not a rail, it is the bottom nav, and there is
+     no hover to open it again. It also has no leading dash to collapse
+     to, so tucking would leave eight blank 22px stubs across the bottom
+     of a phone. The fold is a desktop idea; undo it. */
+  .rail.tucked button{max-width:none;padding:15px 14px}
   /* the hanging sign in the room already says this, so the overlay does
      not need to repeat it on a 390px screen */
   .hint{display:none}

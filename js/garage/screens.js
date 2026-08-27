@@ -623,3 +623,22 @@ export function holoDiag(p) {
   return P.toTexture(c);
 }
 
+
+/* The signboard, proposed. The board currently carries the room's name and
+   then two lines telling you how to drive it, and the HUD chip in the
+   corner now says the same thing and fades once you have done it. Two
+   places saying "click and drag" is one place too many, and the sign is
+   the wrong one of the two to say it: it is the thing hanging over the car
+   with his name on it, so it should say who this is, not how a mouse works.
+
+   Not shipped. buildSign renders this only under ?sign=two, so the
+   proposal can be photographed in the room and looked at before anybody
+   changes the words over the door. Copy is the owner's call, not mine. */
+export function signTextureTwoLine() {
+  const { c, x, w, h } = P.canvas(1024, 256);
+  x.fillStyle = '#12161c'; x.fillRect(0, 0, w, h);
+  x.strokeStyle = '#39414d'; x.lineWidth = 6; x.strokeRect(8, 8, w - 16, h - 16);
+  P.line(x, "BRIAN'S GARAGE", { font: P.fonts.display, size: 74, color: P.INK, x: w / 2, y: 130, align: 'center', track: 7 });
+  P.line(x, 'I like building things', { font: P.fonts.sans, size: 30, color: P.INK2, x: w / 2, y: 186, align: 'center', track: 2 });
+  return P.toTexture(c);
+}

@@ -31,16 +31,35 @@ function framed(url, w, h, depth = 0.03) {
   const img = photoPlane(url, w, h);
   img.position.z = depth / 2 + 0.002;
   g.add(img);
+  /* A sheet of glass over the print. It changes nothing about the picture
+     and adds one thing: a specular that slides across as you orbit. That
+     slide is the entire difference between a photograph hanging on a wall
+     and a photograph painted onto one, and it costs a plane. Kept at 6%
+     and not a point more, because a photo you cannot read through the
+     reflection is a worse photo. depthWrite off so it never z-fights the
+     print a couple of millimetres behind it. */
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(w + 0.05, h + 0.05),
+    new THREE.MeshStandardMaterial({
+      color: 0xdfe8f8, roughness: 0.07, metalness: 0,
+      transparent: true, opacity: 0.06, depthWrite: false,
+    }));
+  glass.position.z = depth / 2 + 0.006;
+  g.add(glass);
   return g;
 }
 
 /* ------------------------------------------------------------ signage */
 
-export function buildSign(scene, touch) {
+export function buildSign(scene, touch, twoLine = false) {
   const g = new THREE.Group();
+  /* twoLine is the unshipped proposal, reachable only via ?sign=two, so it
+     can be photographed hanging in the room rather than argued about flat. */
+  const signMap = twoLine ? S.signTextureTwoLine()
+    : touch ? S.touchSignTexture() : S.signTexture();
   const board = new THREE.Mesh(
     new THREE.BoxGeometry(1.86, 0.48, 0.05),
-    new THREE.MeshStandardMaterial({ map: touch ? S.touchSignTexture() : S.signTexture(), roughness: 0.7, metalness: 0.2 })
+    new THREE.MeshStandardMaterial({ map: signMap, roughness: 0.7, metalness: 0.2 })
   );
   g.add(board);
   for (const sx of [-1, 1]) {
@@ -105,8 +124,9 @@ export function buildBench(scene, opts = {}) {
   peg.position.set(wallX - 0.02, 1.72, zc);
   peg.rotation.y = -Math.PI / 2;
   g.add(peg);
+  const wrenchLen = P.seeded(0x77e9c401);
   for (let i = 0; i < 7; i++) {
-    const l = 0.20 + Math.random() * 0.16;
+    const l = 0.20 + wrenchLen() * 0.16;
     const wrench = new THREE.Mesh(new THREE.BoxGeometry(0.03, l, 0.014), ALU());
     wrench.position.set(wallX - 0.06, 2.05 - l / 2, zc - 1.25 + i * 0.19);
     g.add(wrench);
@@ -692,13 +712,20 @@ export function buildWall(scene) {
   plot.rotation.z = 0.02;
   g.add(plot);
 
-  /* a strip of experience index cards running along the bottom */
+  /* a strip of experience index cards running along the bottom.
+     The tilt used to be Math.random() per card, which is the right look
+     and the wrong mechanism: the wall was rearranged on every load, so no
+     two screenshots of one build ever matched. Fixed seed, same wall, and
+     the spread is held to about 1.5 degrees — enough that they read as
+     pinned up by hand, little enough that they do not read as falling off.
+     A hair of vertical scatter too, for the same reason. */
+  const tilt = P.seeded(0xca4d5711);
   let z = zc - 1.42;
   for (const e of EXPERIENCE) {
     const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24), new THREE.MeshStandardMaterial({
       map: S.noteTexture(e.short || e.org, [e.role, e.when], '#3b6fd4'), roughness: 0.95,
     }));
-    face(card, 0.80, z, 0, (Math.random() - 0.5) * 0.05);
+    face(card, 0.80 + (tilt() - 0.5) * 0.02, z, 0, (tilt() - 0.5) * 0.052);
     z += 0.68;
   }
 
@@ -1003,10 +1030,23 @@ export function buildDog(scene) {
     color: 0x2a3039, roughness: 0.62, metalness: 0.35,
   }));
   film.add(filmFrame);
-  const filmFace = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), new THREE.MeshBasicMaterial({ map: walkTex }));
+  /* A print in a frame, not a lightbox. These were Basic, which means they
+     ignored the room entirely and rendered at full brightness: in a corner
+     this dark that made a white photograph the brightest object at the
+     station, brighter than the robot it is a photograph OF. Standard puts
+     it back under the clip lamp above it, where a framed print belongs, and
+     lets Iron Bark be the thing you look at first.
+     The board next to it stays Basic on purpose. That one really is a
+     screen, it is dark-field UI rather than a white print, and it has its
+     own glow light behind it. */
+  const printMat = (map) => new THREE.MeshStandardMaterial({
+    map, roughness: 0.82, metalness: 0.02,
+  });
+  const filmFace = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), printMat(walkTex));
   filmFace.position.set(0, 0.05, 0.021);
   film.add(filmFace);
-  const filmCap = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.075), new THREE.MeshBasicMaterial({ map: S.fieldCaptionTexture() }));
+  const filmCap = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.075),
+    printMat(S.fieldCaptionTexture()));
   filmCap.position.set(0, -0.2425, 0.021);
   film.add(filmCap);
 
