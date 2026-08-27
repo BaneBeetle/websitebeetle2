@@ -186,8 +186,31 @@ async function start() {
     { id: 'car', label: 'CARBEETLE 0.91', u0: 0.795, u1: 0.895,
       min: carBox.min.clone(), max: carBox.max.clone() },
   ];
-  let droneLock = null, scanFloor = 0;
+  /* How far the beam gets before it hits what it is aiming at. A sensor
+     that aimed at a centre and drew a beam all the way to it would draw
+     a beam through the bodywork and out of the far door, so the length
+     is where the ray enters the box, not the distance to the middle of
+     it. The standard slab test, clamped at zero: the drone is always
+     outside these two boxes and always above them, so the near hit is
+     the top face or a flank and never behind the sensor. */
+  const slab = (o, d, lo, hi) => {
+    if (Math.abs(d) < 1e-6) return 0;          // parallel to this pair of faces
+    const t0 = (lo - o) / d, t1 = (hi - o) / d;
+    return Math.min(t0, t1);
+  };
+  const rayEntry = (o, d, min, max) => Math.max(0,
+    slab(o.x, d.x, min.x, max.x),
+    slab(o.y, d.y, min.y, max.y),
+    slab(o.z, d.z, min.z, max.z));
+
+  let droneLock = null, scanFloor = 0, scanAim = 0, aimTarget = null;
   const scanCam = new THREE.Vector3();
+  const aimAt = new THREE.Vector3();
+  const DOWN = new THREE.Vector3(0, -1, 0);      // the beam's own axis, unaimed
+  const scanEuler = new THREE.Euler();
+  const qGround = new THREE.Quaternion(), qBeam = new THREE.Quaternion();
+  const qAim = new THREE.Quaternion(), qTilt = new THREE.Quaternion();
+  const qTmp = new THREE.Quaternion(), qYoke = new THREE.Quaternion();
   setProgress(0.92);
 
   /* ---------------------------------------------------------- picking */
@@ -1095,6 +1118,34 @@ async function start() {
          ground clutter fades out exactly when the drone is overhead, so
          the recognition frame has the moment to itself. */
       const scan = drone.scan;
+
+      /* Whether the camera has hold of something, decided before the
+         beam is placed rather than after it, because the answer is what
+         the beam is for. Both triggers are pure functions of the sampled
+         flight, so the moment is a place on the ring rather than a time
+         on a clock and __exp.step lands on the same frame twice. */
+      const iron = DRONE_SCANS[0], beetle = DRONE_SCANS[1];
+      const du = (D.s / drone.len) % 1;
+      let lock = null, lockK = 0;
+      if (D.hold > 0 && D.stop === drone.route[iron.wp]) {
+        lock = iron; lockK = D.hold;
+      } else if (du >= beetle.u0 && du < beetle.u1) {
+        lock = beetle; lockK = (du - beetle.u0) / (beetle.u1 - beetle.u0);
+      }
+
+      /* The swing itself is the one thing here allowed to remember the
+         last frame, exactly as the bank and the floor already do: the
+         trigger stays a place on the ring, the head just takes a few
+         tenths of a second to get there and the same to come back. The
+         target outlives the lock on purpose, so the release eases out
+         still tracking rather than snapping to plumb the frame the
+         brackets die. Smoothstepped on the way out because a bare
+         accumulator eases out but leaves at full speed, and a gimbal
+         that leaves at full speed reads as a cut. */
+      if (lock) aimTarget = lock;
+      scanAim += ((lock ? 1 : 0) - scanAim) * Math.min(1, dt * 6.0);
+      const aimK = scanAim * scanAim * (3 - 2 * scanAim);
+
       const overCar = dronePos.x > carBox.min.x - 0.12 && dronePos.x < carBox.max.x + 0.12
                    && dronePos.z > carBox.min.z - 0.12 && dronePos.z < carBox.max.z + 0.12;
       scanFloor += ((overCar ? carBox.max.y : 0) - scanFloor) * Math.min(1, dt * 2.6);
@@ -1102,6 +1153,16 @@ async function start() {
       /* how much of the beam is landing on open concrete: clear floor is the
          full two metres, and anything less than that is the car */
       const onFloor = THREE.MathUtils.clamp((clearance - 0.9) / 0.8, 0, 1);
+      /* An aimed beam is landing on a target, so by the same measure none
+         of it is on concrete. That one term is what carries the restraint
+         through the whole recognition: it takes the footprint away, and it
+         holds the beam to the brightness it already uses over something
+         close rather than the brightness it uses over an open floor. Over
+         the car the clearance had already taken this to nothing, so that
+         moment is unchanged to the last bit; over Iron Bark's corner it
+         had not, and a full floor scanning beam swung onto him at arm's
+         length washed half the frame from inside his own cage. */
+      const land = onFloor * (1 - aimK);
 
       /* The sensor is gimballed, so it lags the airframe rather than
          whipping with it: a third of the lean, which is enough to read
@@ -1111,17 +1172,62 @@ async function start() {
       scan.coneRig.position.set(drone.group.position.x,
                                 drone.group.position.y - 0.030,
                                 drone.group.position.z);
-      scan.coneRig.rotation.set(sPitch, 0, sTilt);
+      qGround.setFromEuler(scanEuler.set(sPitch, 0, sTilt));
+      qBeam.copy(qGround);
+
+      /* Aiming. Recognising a car while the sensor goes on staring at the
+         concrete is the fiction breaking at the one moment it matters, so
+         through a lock the beam swings onto the middle of the same box the
+         brackets frame and keeps swinging: the drone is still flying, and
+         a beam that stays glued to a target while the platform moves past
+         is the whole of what "looking" reads as. It stops where the box
+         starts, and the spread angle is left alone, so a shorter throw is
+         a narrower cone here for the same reason it is over the floor. */
+      let reach = clearance;
+      if (aimTarget && scanAim > 1e-4) {
+        aimAt.set((aimTarget.min.x + aimTarget.max.x) / 2,
+                  (aimTarget.min.y + aimTarget.max.y) / 2,
+                  (aimTarget.min.z + aimTarget.max.z) / 2)
+             .sub(scan.coneRig.position).normalize();
+        qAim.setFromUnitVectors(DOWN, aimAt);
+        qBeam.slerp(qAim, aimK);
+        reach += (rayEntry(scan.coneRig.position, aimAt, aimTarget.min, aimTarget.max)
+                  - clearance) * aimK;
+      }
+      scan.coneRig.quaternion.copy(qBeam);
       scan.cone.rotation.y = (clock.t * 0.5) % (Math.PI * 2);   // slow: the ribs read as live
       /* Scaled on all three axes, not just height. A beam has a fixed
          spread angle, so a shorter throw is a narrower cone, and the one
          that only stretched vertically went squat and wide over the car
          instead of tightening the way a real one does. */
-      scan.cone.scale.set(clearance * 0.5, clearance, clearance * 0.5);
+      scan.cone.scale.set(reach * 0.5, reach, reach * 0.5);
+      /* A beam has to survive as far as it claims to reach. Over concrete
+         the tail is deliberately let go, because the footprint is what
+         does the landing down there; on a target there is no footprint,
+         and an emission that evaporates halfway is not terminating on
+         anything. Sliding the sampled window up its own gradient keeps
+         the brightest part exactly as bright and only declines to take
+         the tail all the way to nothing, so what this is allowed to do
+         to the paint is unchanged. */
+      scan.coneMat.map.offset.y = 0.38 * aimK;
+      scan.coneMat.map.repeat.y = 1 - 0.38 * aimK;
+
+      /* The ball turns with the beam, because a sensor whose housing
+         never moves is a sticker. What the yoke is handed is the swing
+         itself, where the beam ended up against where it would have
+         hung, carried back into the airframe's own frame, so it is
+         exactly level whenever the beam is not aimed and cannot
+         accumulate a lean of its own across a lap. */
+      if (scanAim > 1e-4) {
+        qTilt.copy(drone.group.quaternion).multiply(drone.tilt.quaternion);
+        qTmp.copy(qGround).invert().premultiply(qBeam);   // the swing, in world
+        drone.yoke.quaternion.copy(qYoke.copy(qTilt).invert().multiply(qTmp).multiply(qTilt));
+      } else drone.yoke.quaternion.identity();
+      drone.lensMat.color.copy(drone.lensDark).lerp(drone.lensLit, aimK);
       /* breathing, not blinking: the two rates are not multiples, so the
          beam never settles into an obvious loop */
       const breath = 0.86 + Math.sin(clock.t * 1.7) * 0.09 + Math.sin(clock.t * 0.63) * 0.05;
-      scan.coneMat.opacity = (nightMode ? 0.30 : 0.22) * breath * (0.35 + onFloor * 0.65);
+      scan.coneMat.opacity = (nightMode ? 0.30 : 0.22) * breath * (0.35 + land * 0.65);
 
       /* Where the tilted axis actually meets the floor, so the patch is
          somewhere the beam is pointing rather than dead under the hull. */
@@ -1129,7 +1235,7 @@ async function start() {
                              0, dronePos.z - Math.tan(sPitch) * clearance);
       const spread = 0.42 + clearance * 0.30;
       scan.foot.scale.setScalar(spread);
-      scan.gridMat.opacity = 0.16 * onFloor;
+      scan.gridMat.opacity = 0.16 * land;
 
       /* One ranging pulse every beat and a half, expanding and dying.
          Driven off the clock alone, so it is the same pulse on the same
@@ -1141,18 +1247,10 @@ async function start() {
       const beat = (clock.t / 1.6) % 1;
       const ping = Math.max(0, 1 - beat) * Math.min(1, beat * 7);
       scan.pulse.scale.setScalar(0.22 + beat * 0.95);
-      scan.ringMat.opacity = 0.30 * onFloor * ping;
-      scan.cloudMat.opacity = 0.34 * onFloor * (0.58 + 0.42 * ping);
+      scan.ringMat.opacity = 0.30 * land * ping;
+      scan.cloudMat.opacity = 0.34 * land * (0.58 + 0.42 * ping);
 
       /* ---- recognition ---------------------------------------------- */
-      const iron = DRONE_SCANS[0], beetle = DRONE_SCANS[1];
-      const du = (D.s / drone.len) % 1;
-      let lock = null, lockK = 0;
-      if (D.hold > 0 && D.stop === drone.route[iron.wp]) {
-        lock = iron; lockK = D.hold;
-      } else if (du >= beetle.u0 && du < beetle.u1) {
-        lock = beetle; lockK = (du - beetle.u0) / (beetle.u1 - beetle.u0);
-      }
       scan.lock.visible = !!lock;
       if (lock) {
         /* The line walks the long axis of whatever it found, so the plane
@@ -1211,6 +1309,16 @@ async function start() {
        so dropping a tier or asking for less motion cannot leave a beam
        lit on the last values it was handed. */
     drone.scan.root.visible = tier >= 2 && !reduced;
+    /* The eye and its yoke are hardware, so they stay on screen when the
+       scan is retired and have to be put back by hand: otherwise dropping
+       a tier mid recognition parks the drone with its head cocked at
+       something it can no longer see, lit green, for the rest of the
+       session. */
+    if (!drone.scan.root.visible && scanAim !== 0) {
+      scanAim = 0;
+      drone.yoke.quaternion.identity();
+      drone.lensMat.color.copy(drone.lensDark);
+    }
 
     rig.update(dt, now);
     renderer.render(scene, camera);

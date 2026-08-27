@@ -1617,15 +1617,33 @@ export function buildDrone(scene) {
   spine.position.y = 0.025;
   tilt.add(spine);
 
-  /* the camera ball underneath, which is the only reason a shop drone
-     exists: it is the same eye the bench webcam is */
-  const gimbal = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), joint);
-  gimbal.position.set(0, -0.026, 0.030);
-  tilt.add(gimbal);
-  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.009, 8), new THREE.MeshBasicMaterial({ color: 0x0b0e13 }));
-  lens.position.set(0, -0.030, 0.049);
+  /* The camera ball underneath, which is the only reason a shop drone
+     exists: it is the same eye the bench webcam is.
+
+     Ball and lens hang off a yoke of their own rather than off the
+     airframe, so the eye can turn without the aircraft turning. A gimbal
+     that cannot move is a decal, and the one moment this machine exists
+     for is the moment it looks at something: a beam that swung while the
+     hardware went on staring at the floor was the tell. The yoke sits
+     exactly where the ball sat and starts level, so at rest every part
+     of this is still where it always was. */
+  const yoke = new THREE.Group();
+  yoke.position.set(0, -0.026, 0.030);
+  tilt.add(yoke);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), joint);
+  yoke.add(ball);
+  /* Dark glass that picks up the accent only while the sensor has hold
+     of something. Both ends of that mix are named here rather than in the
+     frame, so the one green in this room stays owned by the file that
+     owns the palette. Half way to the accent and no further: this is a
+     lens catching its own return, not a lamp. */
+  const lensDark = new THREE.Color(0x0b0e13);
+  const lensLit = new THREE.Color(P.SCAN_LIT).lerp(lensDark, 0.52);
+  const lensMat = new THREE.MeshBasicMaterial({ color: lensDark });
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.009, 8), lensMat);
+  lens.position.set(0, -0.004, 0.019);
   lens.rotation.x = -0.7;
-  tilt.add(lens);
+  yoke.add(lens);
 
   /* Four arms and four discs. A disc rather than modelled blades: at
      this size a spinning two blade rotor strobes into a flicker, and a
@@ -1675,7 +1693,8 @@ export function buildDrone(scene) {
 
   const scan = buildScan(scene);
 
-  return { group: g, tilt, rotors, led, shadow: sh, discMat, scan,
+  return { group: g, tilt, yoke, rotors, led, shadow: sh, discMat, scan,
+           lensMat, lensDark, lensLit,
            curve: ring.curve, sample: ring.sample, len: ring.len,
            period: ring.period, speed: DRONE_SPEED, cruiseY: 2.03,
            route: DRONE_ROUTE };
