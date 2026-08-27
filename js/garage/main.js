@@ -959,6 +959,54 @@ async function start() {
 
   applyTier();
 
+  /* Compile the hood-open lighting variant now, while the loader is still
+     covering the canvas and a stall is a stall nobody sees.
+
+     The engine bay carries five PointLights of its own, and they only join
+     the scene when the bay group becomes visible, which is the moment the
+     hood cracks. three keys every program on the light counts, so that one
+     frame goes from twelve lights to seventeen and rebuilds every program
+     in the room behind it: measured at 460 ms on an M5, on the single
+     interaction this garage is built around, and always on the FIRST open,
+     which is the one anybody is actually watching. Afterwards the cache
+     holds and a second open costs 2.7 ms.
+
+     Drawn rather than handed to renderer.compile() because the composer
+     renders into a target and three switches in-shader tone mapping off
+     when it does, so the programs the loop will want are only the ones the
+     loop's own path builds. One frame with the bay lit and the hood shut
+     is not a frame anybody sees: the boot overlay is opaque and still up.
+
+     The camera has to be pointed AT the bay for the frame to be worth
+     anything. Programs compile from the light counts alone, but a
+     geometry is only uploaded when something actually draws it, and the
+     bay's hundred-odd little meshes cull out of the boot pose entirely —
+     which is how the first version of this still cost 248 ms with every
+     program already cached. Wide and close enough to hold the whole
+     engine bay, restored before anything else reads the camera. */
+  if (car.bay && car.bay.group) {
+    const wasVisible = car.bay.group.visible;
+    const keep = { fov: camera.fov, pos: camera.position.clone(), quat: camera.quaternion.clone() };
+    car.bay.group.visible = true;
+    camera.fov = 100;
+    camera.position.set(car.root.position.x, 2.0, car.root.position.z + 3.6);
+    camera.lookAt(car.root.position.x, 0.8, car.root.position.z + 1.2);
+    camera.updateProjectionMatrix();
+    /* Opened for the frame, not merely revealed. Drivers link and validate
+       lazily, on the first draw that actually uses a state, so the panel
+       has to be where it will be when the visitor opens it or the work
+       just moves to their frame instead of this one. */
+    car.setHood(1);
+    render();
+    car.setHood(0);
+    car.bay.group.visible = wasVisible;
+    camera.fov = keep.fov;
+    camera.position.copy(keep.pos);
+    camera.quaternion.copy(keep.quat);
+    camera.updateProjectionMatrix();
+    render();
+  }
+
   /* --------------------------------------------------------- the loop */
   let last = performance.now();
   const clock = { t: 0 };
@@ -1674,6 +1722,56 @@ async function start() {
   window.__exp = {
     step(n = 1, dt = 1 / 60) {
       for (let i = 0; i < n; i++) frame(last + dt * 1000, dt);
+    },
+    /* clock.t accumulates across every step() call, so two grabs of the
+       same station taken at different points in a session sit at different
+       animation phases. A/B comparisons need the clock pinned, not merely
+       stepped the same number of times: reset here, step a fixed count,
+       and everything driven by clock.t lands where it landed last time. */
+    setClock(t) {
+      clock.t = t;
+      /* The board and the film clip run their own accumulators, and both
+         only advance on the frames where the dog station is drawn, so they
+         are a function of how much of this session was spent looking at
+         him rather than of the clock. Reset with it, and the cached
+         "last drawn" indices with them, or the canvas does not repaint
+         until the phase happens to roll over. */
+      filmT = boardT = 0; filmN = boardPhase = boardFlash = -1;
+    },
+    get clock() { return clock.t; },
+    /* renderer.info.render is reset at the top of every renderer.render(),
+       and the composer calls that once per pass, so reading it after a
+       frame reports the OutputPass fullscreen quad and nothing else.
+       autoReset off around one stepped frame is what makes the counts the
+       whole frame's. `lights` is counted the way WebGLRenderer.projectObject
+       counts it — bail at the first invisible ancestor — because a light
+       under a hidden group costs nothing and should not be in the total. */
+    frameStats(n = 60) {
+      const info = renderer.info, gl = renderer.getContext();
+      info.autoReset = false;
+      info.reset();
+      frame(last + 16.7, 1 / 60);
+      const out = {
+        calls: info.render.calls, triangles: info.render.triangles,
+        textures: info.memory.textures, geometries: info.memory.geometries,
+        programs: info.programs ? info.programs.length : -1,
+      };
+      info.autoReset = true;
+      let lights = 0, meshes = 0;
+      scene.traverse((o) => {
+        if (!o.isLight && !o.isMesh) return;
+        for (let p = o; p; p = p.parent) if (!p.visible) return;
+        if (o.isLight) lights++; else meshes++;
+      });
+      out.lights = lights; out.meshes = meshes;
+      // gl.finish() so the timer contains the GPU work, not just its queueing
+      for (let i = 0; i < 4; i++) frame(last + 16.7, 1 / 60);
+      gl.finish();
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) frame(last + 16.7, 1 / 60);
+      gl.finish();
+      out.ms = (performance.now() - t0) / n;
+      return out;
     },
     begin, goto, openHood, handle, rig, scene, camera, renderer, car, shop, room,
     get mode() { return mode; },

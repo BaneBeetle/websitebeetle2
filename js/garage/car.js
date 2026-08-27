@@ -37,7 +37,6 @@ export async function loadCar(scene, onProgress) {
   const byMat = new Map();
   car.traverse((o) => {
     if (!o.isMesh) return;
-    o.frustumCulled = false;
     const n = o.material && o.material.name;
     if (n) (byMat.get(n) || byMat.set(n, []).get(n)).push(o);
   });
@@ -402,7 +401,6 @@ export async function loadCar(scene, onProgress) {
       map: plateTexture(2), roughness: 0.55, metalness: 0.1,
     }));
     front.name = 'front-plate';
-    front.frustumCulled = false;
     keepPlate(front.geometry, 'front');
     shiftFrontPlate(front.geometry, { cx: -0.0243, scale: 0.489, dx: -0.352, dz: -0.048 });
     plate.parent.add(front);
@@ -453,7 +451,6 @@ export async function loadCar(scene, onProgress) {
   split.inside.translate(0, -HOOD.yBack, -HINGE_Z);
   const hood = new THREE.Mesh(split.inside, bodyMat);
   hood.name = 'hood';
-  hood.frustumCulled = false;
   hinge.add(hood);
 
   /* The body shell is not the only mesh with hood-side geometry, and the
@@ -473,7 +470,6 @@ export async function loadCar(scene, onProgress) {
     cut.inside.translate(0, -HOOD.yBack, -HINGE_Z);
     const piece = new THREE.Mesh(cut.inside, extra.material);
     piece.name = 'hood-' + name;
-    piece.frustumCulled = false;
     hinge.add(piece);
   }
 
@@ -486,7 +482,6 @@ export async function loadCar(scene, onProgress) {
     color: 0x1e232b, roughness: 0.86, metalness: 0.10,
   }));
   under.position.z = -0.012;
-  under.frustumCulled = false;
   hinge.add(under);
 
   /* Sound deadening, and nothing else. The dyno number used to be taped
@@ -527,6 +522,36 @@ export async function loadCar(scene, onProgress) {
   wrapper.position.x = -0.28;
   wrapper.position.z = -0.40;
   wrapper.rotation.y = 0.055;                // parked by a human, not a robot
+
+  /* Give the car back its frustum culling.
+
+     Every mesh in here was blanket-set frustumCulled = false at load, and
+     the reason was real: this file cuts the shell into pieces, drops parts
+     out of it, flips a copy of the hood and translates the results onto a
+     hinge, and a geometry whose vertices move after its bounding sphere
+     has been computed carries a sphere that no longer contains it. The
+     cheap way out was to stop asking the question.
+
+     What it cost is a car that is submitted in full from every station in
+     the building, including the four that face away from it. Measured at
+     the exit station: 137 draw calls and 104,241 triangles, of which 121
+     triangles were actually on screen — the rest is the car and its
+     mirrored copy being rasterised behind the camera. Turning culling
+     back on there is 2.63 ms down to 0.76 ms.
+
+     The honest fix is to answer the question rather than duck it: one pass
+     over the finished geometry, after all the surgery, recomputing the
+     bounds so the frustum test is testing something true. It runs once, at
+     load. Anything still needing the old behaviour would have to be a mesh
+     whose vertices move at runtime, and nothing here does — the hood swings
+     on a hinge, which is a transform, and transforms are what the test
+     already accounts for. */
+  car.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    o.geometry.computeBoundingSphere();
+    o.geometry.computeBoundingBox();
+    o.frustumCulled = true;
+  });
 
   const shadow = blobShadow(3.0, 5.4, 0.66);
   shadow.position.set(wrapper.position.x, 0.006, wrapper.position.z);
