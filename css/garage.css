@@ -224,9 +224,13 @@ body.deep .hint{opacity:0}
 .panel.open{transform:none}
 .panel:not(.open){pointer-events:none;visibility:hidden}
 .panel-close{
-  position:sticky;top:0;float:right;margin:-6px -6px 0 0;
+  /* Not a float: the spec rows are flex boxes, and flex boxes do not wrap
+     around floats, so right-aligned values slid underneath it. On its own
+     row nothing can collide, and the backdrop keeps it legible when the
+     panel scrolls beneath the sticky position. */
+  position:sticky;top:0;display:block;margin:-6px -6px 10px auto;
   font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-2);background:transparent;border:1px solid var(--line);
+  color:var(--ink-2);background:rgba(11,14,19,.88);border:1px solid var(--line);
   padding:8px 11px;cursor:pointer;z-index:2;
 }
 .panel-close:hover{color:var(--ink);border-color:var(--blue)}
