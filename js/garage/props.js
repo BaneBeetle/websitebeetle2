@@ -1583,18 +1583,49 @@ export function buildPup(scene) {
 }
 
 /* ------------------------------------------------------- the arm */
-/* A small desk arm clamped to the far end of the bench, where there is
-   real estate to spare and nothing behind it to hide. It moves one
-   machined part back and forth between two spots and looks at it on the
-   way, which is the whole job. Brian built one of these; the site has
-   never had anywhere to show it. */
+/* Brian's own robot arm, clamped to the far end of the bench where there
+   is real estate to spare and nothing behind it to hide. It is the voice
+   controlled one off the projects page, so it is built from the photograph
+   of the real machine rather than from the idea of a robot arm: printed
+   white PLA over a black base plate, a hobby servo showing at every joint,
+   two runs of the orange and brown servo lead, and the pair of googly eyes
+   stuck to the gripper that are the entire personality of the thing. It
+   stacks a red cube on a green one, leans back to look at what it did, and
+   then puts it away again.
 
-/* The far end of the bench, past the monitor and clear of the coolant
-   jug and the webcam. Nothing else is using this stretch of MDF, and
-   from the bench station it sits well to the left of the screen. */
+   The kinematics are the ones that were already here — one yaw column,
+   three hinges and a twist, eased on the same smoothstep the bay plates
+   use. Everything below hangs off those same joints. */
+
+/* The far end of the bench, past the monitor and clear of the coolant jug
+   and the webcam. Nothing else is using this stretch of MDF, and from the
+   bench station it sits well to the left of the screen. */
 const ARM_BASE = [3.42, 0.95, -2.09];    // bolted to the bench top
-const ARM_A = [3.22, 0.952, -2.20];      // where the part rests
-const ARM_B = [3.22, 0.952, -1.98];      // where it gets put down
+const ARM_A = [3.234, 0.952, -2.20];     // where the red cube lives
+const ARM_B = [3.234, 0.952, -1.98];     // and the green one
+
+/* One number for the cube, because it is also the pitch of the stack and
+   the height the gripper has to find twice a lap. */
+const ARM_CUBE = 0.028;
+
+/* The gripper, in the carriage's own frame. Shut is where the finger faces
+   just kiss a cube; open adds enough for one to pass between them. */
+const FINGER_SHUT = 0.0200, FINGER_OPEN = 0.012;
+
+/* The googly eyes. Big on purpose: on the real arm they are nearly as wide
+   as the gripper they are stuck to, and shrinking them to something tidier
+   would be the one change that loses the photograph. EYE_RIM is how far the
+   pupil can slide before the black would start to leave the white. */
+const EYE_R = 0.0168, EYE_X = 0.0178, EYE_Y = 0.006;
+const EYE_Z = -0.010, PUPIL_Z = -0.0274, EYE_RIM = 0.0062;
+
+/* The photo's palette and nothing outside it. The arm used to wear the
+   pup's dark shell and blue trim, which is most of why it read as a
+   generic shop robot: printed PLA is matte, faintly warm, and not metal
+   at all. Off-white rather than white — the real prints are ivory, and a
+   pure white here would be the only surface in the garage at full value. */
+const ARM_PLA = () => new THREE.MeshStandardMaterial({ color: 0xe2dfd7, roughness: 0.74, metalness: 0.0 });
+const ARM_DECK = () => new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.80, metalness: 0.06 });
 
 export function buildArm(scene) {
   const g = new THREE.Group();
@@ -1602,162 +1633,291 @@ export function buildArm(scene) {
   g.position.set(...ARM_BASE);
   scene.add(g);
 
-  const shell = PUP_SHELL(), joint = PUP_JOINT(), trim = PUP_TRIM();
+  const pla = ARM_PLA();
   const rbox = (w, h, d, r, mat) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 1, r), mat);
+  /* A printed edge is a 1 mm fillet off the nozzle, not the 13 mm the pup's
+     limbs carry. Dropping the radius is most of what turns these boxes from
+     moulded parts into printed ones. */
+  const part = (w, h, d) => rbox(w, h, d, 0.0035, pla);
 
-  const plate = rbox(0.13, 0.014, 0.13, 0.006, joint);
-  plate.position.y = 0.007;
-  g.add(plate);
-  /* One inset riser instead of four separate bolt heads. At the size this
-     reads on screen the bolts were four draw calls buying about two
-     pixels each, which is the wrong trade for a prop in the background. */
-  const riser = rbox(0.088, 0.010, 0.088, 0.004, shell);
-  riser.position.y = 0.017;
+  /* One geometry and one material for every servo on the machine, scaled
+     per joint. Scaling a unit block stretches its corner fillets into
+     ellipses; at four millimetres across that cannot be seen, and it keeps
+     four servos on one geometry instead of four. */
+  const servoGeo = new RoundedBoxGeometry(1, 1, 1, 1, 0.10);
+  const servoMat = new THREE.MeshStandardMaterial({
+    map: P.servoTexture(), roughness: 0.48, metalness: 0.22,
+  });
+  const servo = (w, h, d, pos, parent) => {
+    const m = new THREE.Mesh(servoGeo, servoMat);
+    m.scale.set(w, h, d);
+    m.position.set(...pos);
+    parent.add(m);
+    return m;
+  };
+
+  /* black base plate, printed riser, and the yaw servo bolted beside it */
+  const deck = rbox(0.150, 0.011, 0.150, 0.004, ARM_DECK());
+  deck.position.y = 0.0055;
+  g.add(deck);
+  const riser = part(0.076, 0.020, 0.076);
+  riser.position.y = 0.021;
   g.add(riser);
+  /* On the arm root, not on the column: the case of a yaw servo is what
+     the column turns against, so it is the one servo that must stay put
+     while the machine looks around. */
+  servo(0.038, 0.026, 0.024, [0.004, 0.024, -0.040], g);
 
   /* yaw column, then shoulder, elbow, wrist: three hinges and a twist */
   const yaw = new THREE.Group();
   yaw.position.y = 0.014;
   g.add(yaw);
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.038, 0.055, 10), shell);
-  column.position.y = 0.028;
+  const column = part(0.052, 0.044, 0.046);
+  column.position.y = 0.034;
   yaw.add(column);
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.030, 0.007, 5, 10), trim);
-  collar.rotation.x = Math.PI / 2;
-  collar.position.y = 0.056;
-  yaw.add(collar);
 
   const shoulder = new THREE.Group();
   shoulder.position.y = 0.062;
   yaw.add(shoulder);
-  const shoulderHub = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), joint);
-  shoulder.add(shoulderHub);
-  const upper = rbox(0.036, 0.155, 0.040, 0.013, shell);
-  upper.position.y = 0.082;
-  shoulder.add(upper);
+  servo(0.034, 0.034, 0.030, [0, 0.062, 0.004], yaw);
+  /* The upper arm is a fork, the way it is printed: two plates either side
+     of the servo it swings on, which is what gives the segment its width
+     without giving it any bulk. */
+  const forkGeo = new RoundedBoxGeometry(0.012, 0.150, 0.040, 1, 0.0035);
+  for (const sx of [-1, 1]) {
+    const f = new THREE.Mesh(forkGeo, pla);
+    f.position.set(sx * 0.024, 0.084, 0);
+    shoulder.add(f);
+  }
 
   const elbow = new THREE.Group();
   elbow.position.y = 0.162;
   shoulder.add(elbow);
-  const elbowHub = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), joint);
-  elbow.add(elbowHub);
-  const fore = rbox(0.030, 0.140, 0.034, 0.011, shell);
-  fore.position.y = 0.074;
+  servo(0.030, 0.030, 0.026, [0, 0.162, 0.002], shoulder);
+  // and the forearm is the single plate that runs up between them
+  const fore = part(0.034, 0.140, 0.036);
+  fore.position.y = 0.075;
   elbow.add(fore);
 
   const wrist = new THREE.Group();
   wrist.position.y = 0.146;
   elbow.add(wrist);
-  const wristHub = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), joint);
-  wrist.add(wristHub);
-  /* the twist that turns the part over so the camera can see the far face */
+  servo(0.028, 0.026, 0.022, [0, 0.146, 0.001], elbow);
+
+  /* the twist, which turns the head to look where the arm is going */
   const roll = new THREE.Group();
   wrist.add(roll);
-  const palm = rbox(0.066, 0.022, 0.034, 0.008, joint);
-  palm.position.y = 0.020;
-  roll.add(palm);
+  const carriage = part(0.074, 0.024, 0.026);
+  carriage.position.y = 0.014;
+  roll.add(carriage);
 
+  /* Local +Y runs from the wrist out to the fingertips, so with the wrist
+     hanging at pi it points at the floor; the eyes go on the -Z face,
+     which is the one that looks out into the room. */
   const fingers = [];
-  const fingerGeo = new RoundedBoxGeometry(0.010, 0.038, 0.028, 1, 0.004);
+  const fingerGeo = new RoundedBoxGeometry(0.011, 0.032, 0.026, 1, 0.003);
   for (const sx of [-1, 1]) {
-    const f = new THREE.Mesh(fingerGeo, ALU());
-    f.position.set(sx * 0.023, 0.048, 0);
+    const f = new THREE.Mesh(fingerGeo, pla);
+    f.position.set(sx * FINGER_SHUT, 0.040, 0);
     roll.add(f);
     fingers.push(f);
   }
-  /* the tip the part hangs from while it is held */
+  /* the point a cube hangs from while it is held */
   const grip = new THREE.Object3D();
-  grip.position.y = 0.062;
+  grip.position.y = 0.050;
   roll.add(grip);
 
-  const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), new THREE.MeshBasicMaterial({ color: 0x8fffb0 }));
-  led.position.set(0, 0.050, 0.034);
-  yaw.add(led);
+  /* ---- the googly eyes ---------------------------------------------
+     Two domes and two loose pupils, which is the whole of it. The dome is
+     cut a little past its equator so the open rim lands inside the
+     carriage rather than showing as a hollow from the side, and the pupil
+     is a flat disc sitting just proud of the apex: at this size a bead
+     riding the curve and a disc across the front are the same handful of
+     pixels, and the disc is one triangle fan instead of a sphere. */
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.30, metalness: 0.0 });
+  const domeGeo = new THREE.SphereGeometry(EYE_R, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.60);
+  const pupilGeo = new THREE.CircleGeometry(0.0064, 14);
+  /* Basic, like every other eye and lamp in this room: it keeps the pupil
+     the darkest thing on the head whatever the lighting is doing, and it
+     keeps the hover tint off it — that only ever touches Standard. */
+  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0d0f12 });
+  const pupils = [];
+  for (const sx of [-1, 1]) {
+    const dome = new THREE.Mesh(domeGeo, eyeMat);
+    dome.position.set(sx * EYE_X, EYE_Y, EYE_Z);
+    dome.rotation.x = -Math.PI / 2;              // pole faces -Z
+    roll.add(dome);
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+    pupil.position.set(sx * EYE_X, EYE_Y, PUPIL_Z);
+    pupil.rotation.y = Math.PI;                  // face -Z with it
+    roll.add(pupil);
+    pupils.push(pupil);
+  }
 
-  /* The part itself. It lives in the arm's own frame so that handing it
-     between the bench and the gripper is a coordinate change, not a
-     reparent, and it can never be left orphaned mid loop. */
-  /* Machined steel rather than the same aluminium as the fingers, or the
-     part disappears into the hand holding it at any real viewing size. */
-  const part = rbox(0.036, 0.020, 0.036, 0.005, new THREE.MeshStandardMaterial({
-    color: 0x5a6068, roughness: 0.36, metalness: 0.84,
-  }));
-  g.add(part);
-  const spotA = new THREE.Vector3(ARM_A[0] - ARM_BASE[0], ARM_A[1] - ARM_BASE[1] + 0.010, ARM_A[2] - ARM_BASE[2]);
-  const spotB = new THREE.Vector3(ARM_B[0] - ARM_BASE[0], ARM_B[1] - ARM_BASE[1] + 0.010, ARM_B[2] - ARM_BASE[2]);
-  part.position.copy(spotA);
+  /* ---- the lead -----------------------------------------------------
+     Two runs of servo cable and only two. The real machine wears a loom;
+     a loom here would be a dozen tubes on a prop that draws forty pixels
+     across, which is the wrong trade. Both are strapped to a single
+     segment rather than spanning a joint, which is how the cable is
+     actually routed on the arm and what lets them stay rigid geometry
+     instead of a curve rebuilt on every frame. */
+  const lead = (pts, color, parent) => {
+    const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)));
+    const m = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 16, 0.0021, 5, false),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.58, metalness: 0.04 }));
+    parent.add(m);
+    return m;
+  };
+  /* On +Z, which is the face that turns toward the room. Under the column's
+     own yaw a point at local +Z lands at world -X, and -X is where the
+     camera stands at all three bearings this arm works at; routed on the
+     other face the whole run was hidden behind the column every time it
+     mattered. */
+  lead([[-0.026, -0.010, 0.020], [-0.032, 0.004, 0.033], [-0.024, 0.024, 0.038],
+        [-0.010, 0.040, 0.031], [-0.002, 0.052, 0.022]], 0xd4761f, yaw);
+  lead([[0.022, -0.010, 0.018], [0.030, 0.008, 0.030], [0.023, 0.028, 0.035],
+        [0.010, 0.043, 0.028], [0.002, 0.053, 0.019]], 0x6a4620, yaw);
 
-  /* Angles are not eyeballed: the two link solution for this arm puts
-     the wrist exactly over a given spot on the bench, and the gripper is
-     then turned to hang straight down from it. AT sits on the part, OVER
-     clears it by 60 mm, LIFT holds it up in the middle where both spots
-     can see it. Bearings are the compass angles from the base to each
-     spot, so the column turns to face the work rather than guessing. */
-  const B_A = -2.0736, B_B = -1.0680, B_MID = -1.5708;
-  const OVER = { sh: 0.6644, el: 1.4029, wr: 1.0743 };
-  const DOWN = { sh: 0.8894, el: 1.4746, wr: 0.7776 };
-  const UP = { sh: 0.0962, el: 1.6207, wr: 1.4247 };
-  const IDLE = { sh: 0.0277, el: 1.6249, wr: 1.4889 };
+  /* the busy light, on the deck where a board LED would be */
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.005, 6, 4), new THREE.MeshBasicMaterial({ color: 0x8fffb0 }));
+  led.position.set(-0.040, 0.013, -0.056);
+  g.add(led);
+
+  /* ---- the cubes ----------------------------------------------------
+     The two off the bench in the photograph. They live in the arm's own
+     frame so that handing one between the bench and the gripper is a
+     coordinate change rather than a reparent, and neither can ever be left
+     orphaned mid lap. The letters are the two spots they belong to, which
+     is the same A and B this file has always called them. */
+  const cubeGeo = new RoundedBoxGeometry(ARM_CUBE, ARM_CUBE, ARM_CUBE, 2, 0.0032);
+  const cube = (fill, letter) => {
+    const m = new THREE.Mesh(cubeGeo, new THREE.MeshStandardMaterial({
+      map: P.cubeFaceTexture(fill, letter), roughness: 0.54, metalness: 0.0,
+    }));
+    g.add(m);
+    return m;
+  };
+  const cubes = [{ key: 'r', mesh: cube('#cf3a30', 'A') },
+                 { key: 'g', mesh: cube('#57b83f', 'B') }];
+
+  const spotA = new THREE.Vector3(ARM_A[0] - ARM_BASE[0], ARM_A[1] - ARM_BASE[1] + ARM_CUBE / 2, ARM_A[2] - ARM_BASE[2]);
+  const spotB = new THREE.Vector3(ARM_B[0] - ARM_BASE[0], ARM_B[1] - ARM_BASE[1] + ARM_CUBE / 2, ARM_B[2] - ARM_BASE[2]);
+
+  /* Angles are not eyeballed: the two link solution for this arm puts the
+     wrist exactly over a given spot on the bench, and the gripper is then
+     turned to hang straight down from it. The heights are the ones the job
+     actually needs — DOWN closes on a cube standing on the bench, STACK
+     closes on one standing on another cube, CLEAR is 60 mm over the taller
+     of the two so a single approach height serves both ends, UP is the
+     carry. Both spots sit at the same 228 mm radius from the column, which
+     is why one set of angles serves either end and only the bearing
+     changes; the bearings are the compass angles from the base to each
+     spot, so the column turns to face the work rather than guessing.
+
+     The two spots sit 14 mm further in across the bench than the machined
+     part they replaced. That is not taste: at the old 228 mm the googly
+     eyes, which stand proud of the carriage and are the one part of this
+     worth keeping full size, swung 9 mm outside the envelope the arm is
+     allowed. Pulling the reach in was the cheaper of the two corrections. */
+  const B_A = -2.1049, B_B = -1.0367, B_MID = -1.5708;
+  const DOWN = { sh: 0.8763, el: 1.5869, wr: 0.6783 };
+  const STACK = { sh: 0.7491, el: 1.5822, wr: 0.8103 };
+  const CLEAR = { sh: 0.5407, el: 1.4602, wr: 1.1406 };
+  const UP = { sh: 0.0949, el: 1.6221, wr: 1.4246 };
+  const IDLE = { sh: 0.0522, el: 1.7662, wr: 1.3232 };
+  /* The one pose that is not a reach: the arm pulls back off the stack,
+     rises 100 mm above it, and cocks the head 0.26 rad past straight down.
+     Solved the same way as the rest, with that lean as the end effector
+     angle.
+
+     It is a lean, not an aim, and the difference is deliberate. Aiming the
+     eyes AT the stack takes about 1.2 rad of cock, and a shallow dome seen
+     from 60 degrees off its axis stops being an eye: you get the rim, the
+     pupil slides behind the edge, and the pose reads as a broken wrist
+     rather than as a machine looking at something. At 0.26 the faces stay
+     square enough to the room to still read as eyes, and what sells the
+     beat is the pull back and the two seconds of holding still. */
+  const ADMIRE = { sh: 0.2805, el: 1.5560, wr: 1.5650 };
+
   const at = (bearing, k, grip, rl = 0) => ({ yaw: bearing, sh: k.sh, el: k.el, wr: k.wr, rl, grip });
-
   const REST = at(B_MID, IDLE, 0.6);
-  const OVER_A = at(B_A, OVER, 1), DOWN_A = at(B_A, DOWN, 1), SHUT_A = at(B_A, DOWN, 0);
-  const UP_A = at(B_A, UP, 0), UP_A_OPEN = at(B_A, UP, 1);
-  const OVER_B = at(B_B, OVER, 0), DOWN_B = at(B_B, DOWN, 0), OPEN_B = at(B_B, DOWN, 1);
-  const UP_B = at(B_B, UP, 1), UP_B_HELD = at(B_B, UP, 0);
-  const CARRY = at(B_MID, UP, 0);
-  /* The look. The gripper stays pointing down so the part hangs below
-     the fingers in clear air, and the wrist turns it through most of a
-     revolution: a part held out flat towards the room would be hidden
-     behind the hand holding it from half the angles in the garage. */
-  const LOOK = at(B_MID, UP, 0, 2.6);
 
-  /* held: 1 while the part is in the hand, so the frame loop knows
-     whether to read its position off the gripper or off the bench.
-     spot names which end it belongs to when it is not held. */
-  const steps = [
-    { dur: 2.4, a: REST, b: REST, held: 0, spot: 'a', rest: 1 },
-    { dur: 1.5, a: REST, b: OVER_A, held: 0, spot: 'a' },
-    { dur: 0.9, a: OVER_A, b: DOWN_A, held: 0, spot: 'a' },
-    { dur: 0.6, a: DOWN_A, b: SHUT_A, held: 0, spot: 'a' },   // fingers close on it
-    { dur: 1.1, a: SHUT_A, b: UP_A, held: 1 },
-    { dur: 0.9, a: UP_A, b: CARRY, held: 1 },
-    { dur: 1.6, a: CARRY, b: LOOK, held: 1 },                 // turn it over
-    { dur: 1.2, a: LOOK, b: CARRY, held: 1 },
-    { dur: 0.9, a: CARRY, b: UP_B_HELD, held: 1 },
-    { dur: 0.9, a: UP_B_HELD, b: DOWN_B, held: 1 },
-    { dur: 0.6, a: DOWN_B, b: OPEN_B, held: 1 },              // fingers let go
-    { dur: 1.0, a: OPEN_B, b: UP_B, held: 0, spot: 'b' },
-    { dur: 1.4, a: UP_B, b: REST, held: 0, spot: 'b' },
-    { dur: 2.8, a: REST, b: REST, held: 0, spot: 'b', rest: 1 },
-    { dur: 1.5, a: REST, b: OVER_B, held: 0, spot: 'b' },
-    { dur: 0.9, a: OVER_B, b: OPEN_B, held: 0, spot: 'b' },
-    { dur: 0.6, a: OPEN_B, b: DOWN_B, held: 0, spot: 'b' },   // and pick it back up
-    { dur: 1.1, a: DOWN_B, b: UP_B_HELD, held: 1 },
-    { dur: 0.9, a: UP_B_HELD, b: CARRY, held: 1 },
-    { dur: 1.3, a: CARRY, b: UP_A, held: 1 },
-    { dur: 0.9, a: UP_A, b: DOWN_A, held: 1 },
-    { dur: 0.6, a: DOWN_A, b: SHUT_A, held: 1 },
-    { dur: 0.0, a: SHUT_A, b: DOWN_A, held: 0, spot: 'a' },
-    { dur: 1.0, a: DOWN_A, b: UP_A_OPEN, held: 0, spot: 'a' },
-    { dur: 1.4, a: UP_A_OPEN, b: REST, held: 0, spot: 'a' },
-  ];
+  /* One half of the lap, written once. The travelling cube is lifted off
+     its own spot, set down on top of the one waiting at the other end,
+     looked at, and then taken back. The second half is this same script
+     with the ends and the cubes swapped, which is what makes the pair take
+     turns without a second list to keep in step with the first.
+
+     `where` is the travelling cube: 's' on its own spot, 'k' on top of the
+     stack, 'h' in the hand. The other cube never moves, so the frame loop
+     only needs to know which end it is waiting at. */
+  const BEARING = { a: B_A, b: B_B };
+  const half = (trav, from, onto) => {
+    const bS = BEARING[from], bD = BEARING[onto];
+    /* The head leads the swing by a fifth of a turn, so it is looking
+       where it is going rather than at whatever it just put down. */
+    const lead = Math.sign(bD - bS) * 0.42;
+    const S_OPEN = at(bS, CLEAR, 1), S_AT = at(bS, DOWN, 1), S_SHUT = at(bS, DOWN, 0);
+    const S_LIFT = at(bS, CLEAR, 0);
+    const OUT = at(B_MID, UP, 0, lead), BACK = at(B_MID, UP, 0, -lead);
+    const D_LIFT = at(bD, CLEAR, 0), D_ON = at(bD, STACK, 0);
+    const D_LET = at(bD, STACK, 1), D_OPEN = at(bD, CLEAR, 1);
+    const LOOK = at(bD, ADMIRE, 0.55);
+    return [
+      { dur: 1.8, a: REST, b: REST, where: 's', rest: 1 },
+      { dur: 1.5, a: REST, b: S_OPEN, where: 's' },
+      { dur: 0.9, a: S_OPEN, b: S_AT, where: 's' },
+      { dur: 0.6, a: S_AT, b: S_SHUT, where: 's' },      // fingers close on it
+      { dur: 1.1, a: S_SHUT, b: S_LIFT, where: 'h' },
+      { dur: 0.9, a: S_LIFT, b: OUT, where: 'h' },
+      { dur: 1.1, a: OUT, b: D_LIFT, where: 'h' },
+      { dur: 0.9, a: D_LIFT, b: D_ON, where: 'h' },      // down onto the other cube
+      { dur: 0.6, a: D_ON, b: D_LET, where: 'k' },       // and let go: stacked
+      { dur: 1.0, a: D_LET, b: D_OPEN, where: 'k' },
+      { dur: 1.3, a: D_OPEN, b: LOOK, where: 'k' },
+      { dur: 2.2, a: LOOK, b: LOOK, where: 'k', rest: 1 },  // the pause
+      { dur: 1.2, a: LOOK, b: D_OPEN, where: 'k' },
+      { dur: 0.9, a: D_OPEN, b: D_LET, where: 'k' },
+      { dur: 0.6, a: D_LET, b: D_ON, where: 'k' },       // close on it again
+      { dur: 1.1, a: D_ON, b: D_LIFT, where: 'h' },      // and unstack
+      { dur: 0.9, a: D_LIFT, b: BACK, where: 'h' },
+      { dur: 1.1, a: BACK, b: S_LIFT, where: 'h' },
+      { dur: 0.9, a: S_LIFT, b: S_SHUT, where: 'h' },
+      { dur: 0.6, a: S_SHUT, b: S_AT, where: 's' },      // open: back on the bench
+      { dur: 1.0, a: S_AT, b: S_OPEN, where: 's' },
+      { dur: 1.4, a: S_OPEN, b: REST, where: 's' },
+    ].map((s) => ({ ...s, trav, from, onto }));
+  };
+  /* Red carries first, then green, and the pair alternate forever. */
+  const steps = [...half('r', 'a', 'b'), ...half('g', 'b', 'a')];
   let acc = 0;
   for (const s of steps) { s.t0 = acc; acc += s.dur; s.t1 = acc; }
 
+  /* Left at the size it shipped at. The base plate grew, but the shadow is
+     a decal on the bench rather than swept volume, and widening it is the
+     one thing here that would have pushed a pixel past the documented
+     envelope for no gain at all. */
   const sh2 = blobShadow(0.34, 0.34, 0.34);
   sh2.position.set(0, 0.010, 0);
   g.add(sh2);
 
-  /* Parked in the rest pose for the same reason the pup is. */
+  /* Parked in the rest pose for the same reason the pup is: under reduced
+     motion nothing below this ever runs, so whatever is set here is what
+     the visitor sees — the arm at rest, the cubes on their own spots and
+     the pupils dead centre. */
   yaw.rotation.y = REST.yaw;
   shoulder.rotation.x = REST.sh;
   elbow.rotation.x = REST.el;
   wrist.rotation.x = REST.wr;
-  fingers[0].position.x = -(0.023 + REST.grip * 0.011);
-  fingers[1].position.x = 0.023 + REST.grip * 0.011;
+  fingers[0].position.x = -(FINGER_SHUT + REST.grip * FINGER_OPEN);
+  fingers[1].position.x = FINGER_SHUT + REST.grip * FINGER_OPEN;
+  cubes[0].mesh.position.copy(spotA);
+  cubes[1].mesh.position.copy(spotB);
 
-  return { group: g, yaw, shoulder, elbow, wrist, roll, fingers, grip, led, part,
+  return { group: g, yaw, shoulder, elbow, wrist, roll, fingers, grip, led,
+           cubes, pupils, eyeX: EYE_X, eyeY: EYE_Y, eyeRim: EYE_RIM,
+           cube: ARM_CUBE, shut: FINGER_SHUT, open: FINGER_OPEN,
            spotA, spotB, steps, period: acc };
 }
 

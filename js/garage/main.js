@@ -283,6 +283,17 @@ async function start() {
   const droneAhead = new THREE.Vector3();
   let droneYaw = null, droneBank = 0, dronePitch = 0;
 
+  /* The googly pupils: offset inside the eye and the speed it is moving
+     at, one pair shared by both eyes because both are stuck to the same
+     head and see exactly the same acceleration. Under reduced motion the
+     block that drives these never runs and they stay dead centre, which is
+     where the arm is built holding them. Spring tuned to about 2.2 Hz with
+     the damping at 0.3 of critical: quick enough to answer a swing, slack
+     enough to come back through centre once before it gives up. */
+  let pupX = 0, pupY = 0, pupVX = 0, pupVY = 0;
+  const EYE_STIFF = 196, EYE_DAMP = 8.4;      // omega = 14 rad/s, zeta = 0.30
+  const EYE_SIDE = 0.45, EYE_LIFT = 1.40;     // metres of slip per rad/s^2
+
   /* What the drone's camera is allowed to recognise, and where.
      The car's box is measured off the loaded model rather than typed in,
      because the model is the only thing that knows how long an E46 is.
@@ -361,6 +372,15 @@ async function start() {
   addHit('lamp', new THREE.BoxGeometry(0.55, 0.4, 0.35), V(cx - 0.72, 0.68, cz + 2.28));
   addHit('rev', new THREE.BoxGeometry(0.9, 0.45, 0.4), V(cx, 0.34, cz - 2.28));
 
+  /* The arm is the one prop in this room that IS a project: the machine on
+     the bench and the 'Voice-controlled robotic arm' row in the bench index
+     are the same build. Pointing at it should open what the row opens.
+     Fitted to the swept envelope rather than to the rest pose, or it would
+     stop being clickable for most of its own lap. It is not a station, so
+     nothing needs suppressing: the affordance gate below only ever drops
+     the promise for ids that name one. */
+  addHit('arm', new THREE.BoxGeometry(0.32, 0.27, 0.32), V(3.345, 1.077, -2.09));
+
   for (const h of car.bay.hotspots) {
     const w = h.at.clone();
     // bay hotspots are in the car's Z-up local frame
@@ -395,7 +415,7 @@ async function start() {
      "clickable". */
   const HOVER_GROUPS = {
     bench: bench.group, wall: wall.group, dog: dog.group,
-    bike: bike.group, exit: exit.group,
+    bike: bike.group, exit: exit.group, arm: arm.group,
   };
   for (const src of [bench, wall, dog, bike, exit]) {
     for (const h of src.hotspots) {
@@ -800,6 +820,21 @@ async function start() {
         shop.click();
         dogHop = 1;
         return goto('dog');
+      case 'arm': {
+        /* Exactly the route a row in the bench index takes: the panel opens
+           on the build and the desk behind it changes with it, so arriving
+           by pointing at the machine and arriving by reading the list land
+           in the same place. Written out rather than left to the default
+           goto, because 'arm' names no station and goto() would have
+           nowhere to fly. */
+        shop.click();
+        const p = PROJECTS.find((x) => x.id === 'arm');
+        if (!p) return;
+        openPanel('bench', { project: p });
+        benchShow(p);
+        if (mode !== 'bench') goto('bench', { detail: { project: p } });
+        return;
+      }
       default:
         shop.click();
         return goto(id);
@@ -1368,22 +1403,79 @@ async function start() {
       arm.wrist.rotation.x = mix(st.a.wr, st.b.wr);
       arm.roll.rotation.y = mix(st.a.rl, st.b.rl);
       const open = mix(st.a.grip, st.b.grip);
-      arm.fingers[0].position.x = -(0.023 + open * 0.011);
-      arm.fingers[1].position.x = 0.023 + open * 0.011;
+      arm.fingers[0].position.x = -(arm.shut + open * arm.open);
+      arm.fingers[1].position.x = arm.shut + open * arm.open;
 
-      /* The part rides the gripper by copying its transform outright,
-         so there is no frame where the two disagree. The arm root only
-         carries a translation, so the world orientation of the gripper
-         is already the part's local one. */
-      if (st.held) {
-        arm.grip.getWorldPosition(gripW);
-        arm.group.worldToLocal(gripW);
-        arm.part.position.copy(gripW);
-        arm.grip.getWorldQuaternion(arm.part.quaternion);
-      } else {
-        arm.part.position.copy(st.spot === 'b' ? arm.spotB : arm.spotA);
-        arm.part.quaternion.identity();
+      /* The travelling cube rides the gripper by copying its transform
+         outright, so there is no frame where the two disagree. The arm root
+         only carries a translation, so the world orientation of the gripper
+         is already the cube's local one. Every pose the hand closes in was
+         solved to put the grip exactly where that cube's centre already is,
+         so the handoff in either direction moves nothing.
+
+         The other cube is the one being stacked ON, and stands still all
+         lap. Which is which swaps halfway round, which is the whole reason
+         the two take turns. */
+      for (const c of arm.cubes) {
+        if (c.key !== st.trav) {
+          c.mesh.position.copy(st.onto === 'a' ? arm.spotA : arm.spotB);
+          c.mesh.quaternion.identity();
+        } else if (st.where === 'h') {
+          arm.grip.getWorldPosition(gripW);
+          arm.group.worldToLocal(gripW);
+          c.mesh.position.copy(gripW);
+          arm.grip.getWorldQuaternion(c.mesh.quaternion);
+        } else {
+          const up = st.where === 'k';          // 'k': standing on the other one
+          c.mesh.position.copy((up ? st.onto : st.from) === 'a' ? arm.spotA : arm.spotB);
+          if (up) c.mesh.position.y += arm.cube;
+          c.mesh.quaternion.identity();
+        }
       }
+
+      /* ---- the googly eyes ------------------------------------------
+         Loose pupils in domed sockets. They lag the head, run out to the
+         rim on a hard swing, and come back through centre once before they
+         settle. Second order on purpose: the eased accumulator this file
+         uses for the drone's bank can only ever crawl home, and the
+         overshoot is the entire tell of a googly eye. So a spring with the
+         damping deliberately left under critical, integrated the same way
+         everything else here is — a velocity nudged each frame, and a
+         position that follows it.
+
+         The drive is the head's angular ACCELERATION, taken off the pose
+         rather than off the last two frames. The step eases on
+         e = k*k*(3-2k), whose second derivative in time is exactly
+         6*(1-2k)/dur^2, so multiplying that by the angle the step is
+         sweeping gives the acceleration at t with no frame history in it
+         at all: two grabs at the same clock.t land on the same pupils. The
+         sign is inertia — the socket is dragged out from under the pupil,
+         so the pupil displaces AGAINST the acceleration.
+
+         Yaw and the head's own twist throw it sideways; the shoulder and
+         elbow lift and drop it, each weighted by the length of arm it is
+         actually swinging, because the same angle at the shoulder moves
+         the head twice as far as it does at the elbow. */
+      const ease2 = st.dur > 0 ? 6 * (1 - 2 * k) / (st.dur * st.dur) : 0;
+      const aSide = ((st.b.yaw - st.a.yaw) + (st.b.rl - st.a.rl) * 0.6) * ease2;
+      const aLift = ((st.b.sh - st.a.sh) * 0.30 + (st.b.el - st.a.el) * 0.15) * ease2;
+      pupVX += (-aSide * EYE_SIDE - pupX * EYE_STIFF - pupVX * EYE_DAMP) * dt;
+      pupVY += (-aLift * EYE_LIFT - pupY * EYE_STIFF - pupVY * EYE_DAMP) * dt;
+      pupX += pupVX * dt;
+      pupY += pupVY * dt;
+      /* and the black never leaves the white: scale the velocity down with
+         the position or a pinned pupil keeps its outward speed and sits
+         welded to the rim for the rest of the swing */
+      const pr = Math.hypot(pupX, pupY);
+      if (pr > arm.eyeRim) {
+        const s = arm.eyeRim / pr;
+        pupX *= s; pupY *= s; pupVX *= s; pupVY *= s;
+      }
+      for (let i = 0; i < 2; i++) {
+        arm.pupils[i].position.x = (i ? arm.eyeX : -arm.eyeX) + pupX;
+        arm.pupils[i].position.y = arm.eyeY + pupY;
+      }
+
       /* the status light is green while it works and amber on the rests,
          which is the only thing on either machine that changes colour */
       const busy = st.rest ? 0 : 1;
