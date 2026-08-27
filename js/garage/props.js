@@ -1444,7 +1444,175 @@ export function buildDrone(scene) {
   g.position.copy(p0);
   sh.position.set(p0.x, 0.005, p0.z);
 
-  return { group: g, tilt, rotors, led, shadow: sh, discMat,
+  const scan = buildScan(scene);
+
+  return { group: g, tilt, rotors, led, shadow: sh, discMat, scan,
            curve: ring.curve, sample: ring.sample, len: ring.len,
-           period: ring.period, speed: DRONE_SPEED, cruiseY: 2.03 };
+           period: ring.period, speed: DRONE_SPEED, cruiseY: 2.03,
+           route: DRONE_ROUTE };
+}
+
+/* ------------------------------------------------ the drone's scan */
+/* The camera ball is the reason the drone is here, so this is the part
+   that shows it working. Three layers, which is the structure the survey
+   photographs have: emission from the sensor, a measured patch where the
+   beam lands, and a recognition frame when it finds something it knows.
+   Everything is additive with depth writing off and tone mapping off, so
+   none of it occludes the room and none of it moves when the exposure
+   does. It all hangs off one root at the origin, which means local
+   coordinates are world coordinates and one flag can retire the lot. */
+function buildScan(scene) {
+  const root = new THREE.Group();
+  root.name = 'drone-scan';
+  scene.add(root);
+
+  const additive = (map, opacity) => new THREE.MeshBasicMaterial({
+    map, transparent: true, opacity, depthWrite: false, toneMapped: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  });
+
+  /* The beam. Open ended and a unit metre tall so the frame can scale it
+     to whatever clearance the drone actually has: over the car that is
+     three quarters of a metre, over concrete it is the full two.
+
+     It hangs off its own rig for one reason. The rig carries where the
+     sensor is and which way it is tipped; the cone carries only its spin
+     about its own axis. Putting both on one object means an Euler order
+     decides whether the tilt rotates with the spin, and it should not:
+     the beam would wobble in a circle instead of leaning into the turn. */
+  const coneRig = new THREE.Group();
+  root.add(coneRig);
+  const coneMat = additive(P.scanConeTexture(), 0.5);
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.54, 1, 20, 1, true), coneMat);
+  cone.geometry.translate(0, -0.5, 0);      // apex at the origin, opening downward
+  cone.renderOrder = 2;
+  coneRig.add(cone);
+
+  /* The footprint, all of it flat on the floor and carried by one group
+     so the frame only has to place the group. */
+  const foot = new THREE.Group();
+  root.add(foot);
+
+  const gridMat = additive(P.scanGridTexture(), 0.5);
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), gridMat);
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = 0.012;
+  grid.renderOrder = 2;
+  foot.add(grid);
+
+  /* One ring, expanding and dying on a sawtooth. A pulse per beat rather
+     than a stack of them: the room is dim and three rings at once reads
+     as decoration rather than as a rangefinder. */
+  const ringMat = additive(null, 0.5);
+  ringMat.color.set(P.SCAN_LIT);
+  const pulse = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), ringMat);
+  pulse.rotation.x = -Math.PI / 2;
+  pulse.position.y = 0.014;
+  pulse.renderOrder = 3;
+  foot.add(pulse);
+
+  /* The point cloud. Scattered once, off the index rather than off a
+     random number, so the pattern is the same on every run and stepping
+     the clock backwards reproduces it exactly. The square root on the
+     radius is what spreads the returns evenly over the disc: without it
+     they pile up in the middle, which reads as a splat rather than as a
+     survey. */
+  const N = 420;
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const a = i * 2.399963;                       // golden angle: no clumps, no rings
+    const r = Math.sqrt((i + 0.5) / N) * 1.12;
+    pos[i * 3] = Math.cos(a) * r;
+    pos[i * 3 + 1] = 0.016 + ((i * 37) % 11) * 0.0015;   // a hair of thickness, not a plane
+    pos[i * 3 + 2] = Math.sin(a) * r;
+  }
+  const cloudGeo = new THREE.BufferGeometry();
+  cloudGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const cloudMat = new THREE.PointsMaterial({
+    color: new THREE.Color(P.SCAN_LIT), size: 0.022, sizeAttenuation: true,
+    transparent: true, opacity: 0.6, depthWrite: false, toneMapped: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const cloud = new THREE.Points(cloudGeo, cloudMat);
+  cloud.renderOrder = 3;
+  foot.add(cloud);
+
+  /* The recognition frame. Held in its own group so releasing the lock is
+     one flag rather than four. */
+  const lock = new THREE.Group();
+  lock.visible = false;
+  root.add(lock);
+
+  /* Corner brackets rather than a cage. The project's own detector draws
+     a rectangle; the honest three dimensional version of that rectangle
+     is the eight corners of the box with a short arm run out along each
+     axis, which frames the thing without drawing a box around it. */
+  const bracketMat = new THREE.LineBasicMaterial({
+    color: new THREE.Color(P.SCAN_LIT), transparent: true, opacity: 0.9,
+    depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending,
+  });
+  const CORNERS = 8, ARMS = 3;
+  const bpos = new Float32Array(CORNERS * ARMS * 2 * 3);
+  const bracketGeo = new THREE.BufferGeometry();
+  bracketGeo.setAttribute('position', new THREE.BufferAttribute(bpos, 3));
+  const brackets = new THREE.LineSegments(bracketGeo, bracketMat);
+  brackets.renderOrder = 4;
+  lock.add(brackets);
+
+  /* Rewritten only when the target changes, which is twice a lap. The arm
+     is a fixed fraction of the shortest side, so a box the size of a
+     robot dog and a box the size of a car get brackets that read as the
+     same instrument rather than the same shape scaled. */
+  const fitBrackets = (min, max) => {
+    const sx = max.x - min.x, sy = max.y - min.y, sz = max.z - min.z;
+    const arm = Math.min(sx, sy, sz) * 0.22;
+    let n = 0;
+    const seg = (x, y, z, dx, dy, dz) => {
+      bpos[n++] = x; bpos[n++] = y; bpos[n++] = z;
+      bpos[n++] = x + dx; bpos[n++] = y + dy; bpos[n++] = z + dz;
+    };
+    for (const ix of [0, 1]) for (const iy of [0, 1]) for (const iz of [0, 1]) {
+      const x = ix ? max.x : min.x, y = iy ? max.y : min.y, z = iz ? max.z : min.z;
+      seg(x, y, z, ix ? -arm : arm, 0, 0);
+      seg(x, y, z, 0, iy ? -arm : arm, 0);
+      seg(x, y, z, 0, 0, iz ? -arm : arm);
+    }
+    brackets.geometry.attributes.position.needsUpdate = true;
+    brackets.geometry.computeBoundingSphere();
+  };
+
+  /* The label, baked once per target rather than repainted per frame.
+     Sprites keep it facing the visitor from every station, which is what
+     a readout has to do. */
+  const labelMat = new THREE.SpriteMaterial({
+    transparent: true, depthWrite: false, toneMapped: false, opacity: 0.95,
+  });
+  const label = new THREE.Sprite(labelMat);
+  label.scale.set(0.86, 0.215, 1);
+  /* Straddling the corner rather than hanging off one side of it: half
+     the readout sits over the target and half beside it, so whichever
+     way round the visitor is standing the text has somewhere to go. */
+  label.center.set(0.5, 0.5);
+  label.renderOrder = 5;
+  lock.add(label);
+
+  /* Painted once per name and kept. Two targets means two canvases for
+     the life of the page rather than one per recognition. */
+  const labels = new Map();
+  const labelFor = (text) => {
+    if (!labels.has(text)) labels.set(text, P.detectLabel(text));
+    return labels.get(text);
+  };
+
+  /* One plane walked once through the target volume. Broadside to the
+     stations that look at the car, which is the only orientation a scan
+     line is actually visible from. */
+  const sweepMat = additive(P.scanSweepTexture(), 0.5);
+  const sweep = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), sweepMat);
+  sweep.renderOrder = 4;
+  lock.add(sweep);
+
+  return { root, coneRig, cone, coneMat, foot, grid, gridMat, pulse, ringMat,
+           cloud, cloudMat, lock, brackets, bracketMat, fitBrackets,
+           label, labelMat, labelFor, sweep, sweepMat };
 }
