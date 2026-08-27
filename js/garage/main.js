@@ -130,7 +130,9 @@ async function start() {
   room.floorMat.opacity = 0.90;
   room.floor.renderOrder = -2;
 
-  const bench = Props.buildBench(scene);
+  /* the bench borrows the car's own shell for the hologram over it,
+     rather than paying for the glTF twice */
+  const bench = Props.buildBench(scene, { ghost: car.body.geometry, reduced });
   const wall = Props.buildWall(scene);
   const dog = Props.buildDog(scene);
   const bike = Props.buildBike(scene);
@@ -437,12 +439,12 @@ async function start() {
     if (act === 'close') return closePanel();
     if (act === 'go') return goto(b.dataset.to);
     if (act === 'hood') return openHood();
-    if (act === 'bench-index') { openPanel('bench'); benchScreen(bench.index); return; }
+    if (act === 'bench-index') { openPanel('bench'); benchShow(null); return; }
     if (act === 'project') {
       const p = PROJECTS.find((x) => x.id === b.dataset.id);
       if (!p) return;
       openPanel('bench', { project: p });
-      benchScreen(S.screenProject(p));
+      benchShow(p);
       if (mode !== 'bench') goto('bench', { detail: { project: p } });
       return;
     }
@@ -456,6 +458,10 @@ async function start() {
     u.tB.value = tex;
     u.uProgress.value = 0;
     clearTimeout(screenTimer);
+    /* Reduced motion gets the new pane outright. The wings already snap,
+       so without this the browser would be the one thing in the corner
+       still dissolving for anyone who asked the room to hold still. */
+    if (reduced) { u.uProgress.value = 1; return; }
     const t0 = performance.now();
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / 320);
@@ -463,6 +469,14 @@ async function start() {
       if (k < 1) screenTimer = setTimeout(step, 16);
     };
     step();
+  }
+
+  /* One gesture, four panes: the browser crossfades to the build and the
+     wings follow it, so picking a project changes the whole desk rather
+     than one rectangle in the middle of it. Passing null means the index. */
+  function benchShow(p) {
+    benchScreen(p ? S.holoProject(p) : bench.index);
+    bench.holo.sync(p);
   }
 
   /* --------------------------------------------------------- the hood */
@@ -529,7 +543,7 @@ async function start() {
       case 'spec-tune': shop.click(); return openPanel('bay', { spec: 'tune' });
       case 'bench':
         shop.click();
-        if (mode === 'bench') { benchScreen(bench.index); openPanel('bench'); return; }
+        if (mode === 'bench') { benchShow(null); openPanel('bench'); return; }
         return goto('bench');
       case 'dog':
         shop.click();
@@ -719,8 +733,11 @@ async function start() {
     }
 
     if (tier >= 2) dressing.blades.rotation.z -= dt * 7.4;
-    // the bench screen is always on, even when nobody is reading it
-    if (tier >= 2) bench.screenMat.uniforms.uTime.value = clock.t;
+    /* The bench arc is always on, even when nobody is reading it. Below
+       tier 2, or under reduced motion, the panes stay lit but hold
+       perfectly still: no shimmer, no drift, no turntable. Crossfades
+       still finish, because a half-changed pane is a bug, not a flourish. */
+    bench.holo.step(clock.t, dt, tier >= 2 && !reduced);
     // sound the horn and the door opener notices, which is the whole point
     // of the Carbeetle project sitting on the ceiling above you
     if (openerBlink > 0) {

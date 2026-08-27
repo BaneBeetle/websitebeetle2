@@ -310,3 +310,97 @@ export function glowTexture(color = '#cfe0ff', mid = '150,180,240', edge = '120,
   x.fillStyle = g; x.fillRect(0, 0, w, h);
   return toTexture(c);
 }
+
+/* ---- holography -------------------------------------------------- */
+
+/* The bench panes are painted on nothing. Additive blending means black
+   is invisible, so the whole language has to be built out of light: one
+   hue family, and brightness carrying every level of the hierarchy. Four
+   steps is enough, and holding to four is what keeps a dense pane from
+   turning into confetti. */
+export const HOLO_HI = '#e4f2ff';    // the one thing per pane you must read
+export const HOLO = '#a8ccff';       // the workhorse
+export const HOLO_MID = '#6f9edb';   // supporting text, dense tiers
+export const HOLO_DIM = '#3d6ba6';   // rules, brackets, anything inactive
+
+/* The pane itself: a whisper of fill so the glass has presence, the
+   scanlines that say it is being drawn rather than printed, and corner
+   brackets at a fixed inset. The brackets are the reason four panes of
+   four different sizes read as one instrument, so the inset and the tick
+   never scale with the canvas. */
+export function holoFrame(x, w, h, { wash = 0.022, scan = 0.042, dim = HOLO_DIM } = {}) {
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.00, `rgba(122,167,255,${wash})`);
+  g.addColorStop(0.58, `rgba(122,167,255,${wash * 0.3})`);
+  g.addColorStop(1.00, `rgba(122,167,255,${wash * 0.85})`);
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+
+  x.fillStyle = `rgba(168,204,255,${scan})`;
+  for (let y = 2; y < h; y += 4) x.fillRect(0, y, w, 1);
+
+  const inset = 13, tick = 27;
+  x.strokeStyle = dim; x.lineWidth = 2.5;
+  for (const [cx, cy, sx, sy] of [
+    [inset, inset, 1, 1], [w - inset, inset, -1, 1],
+    [inset, h - inset, 1, -1], [w - inset, h - inset, -1, -1],
+  ]) {
+    x.beginPath();
+    x.moveTo(cx, cy + sy * tick);
+    x.lineTo(cx, cy);
+    x.lineTo(cx + sx * tick, cy);
+    x.stroke();
+  }
+}
+
+/* The three-part header the room already speaks in: the board over Iron
+   Bark's dock and the caption under the field-test frame are both built
+   this way, so the bench inherits it rather than inventing a fifth
+   dialect. Returns the baseline of the hairline under it. */
+export function holoHead(x, w, name, sub, right, { y = 46, size = 22 } = {}) {
+  let px = 26;
+  const put = (t, weight, color) => {
+    line(x, t, { font: FONT_M, size, weight, color, x: px, y, track: 2.5, upper: true });
+    x.font = `${weight} ${size}px ${FONT_M}`;
+    px += [...t].reduce((a, ch) => a + x.measureText(ch).width + 2.5, -2.5) + 13;
+  };
+  put(name, 700, HOLO);
+  if (sub) { put('//', 400, HOLO_DIM); put(sub, 400, HOLO_MID); }
+  if (right) {
+    line(x, right, {
+      font: FONT_M, size: size - 4, color: HOLO_DIM,
+      x: w - 26, y, align: 'right', track: 2.5, upper: true,
+    });
+  }
+  const ry = y + 16;
+  x.fillStyle = HOLO_DIM;
+  x.globalAlpha = 0.55; x.fillRect(26, ry, w - 52, 1.5); x.globalAlpha = 1;
+  return ry;
+}
+
+/* A hairline between data rows. At this density boxes would be noise, so
+   nothing on a pane is ever drawn inside a container. */
+export function holoRule(x, x0, y, w, alpha = 0.3) {
+  x.save();
+  x.globalAlpha = alpha;
+  x.fillStyle = HOLO_DIM;
+  x.fillRect(x0, y, w, 1);
+  x.restore();
+}
+
+/* A stroked chip. The one affordance shape on the bench: tags, states and
+   the open-link control are all this, at one radius of nothing, so the
+   panes keep a single corner language. */
+export function holoChip(x, text, { px = 0, y = 0, h = 30, size = 14, pad = 12,
+                                    color = HOLO, stroke = HOLO_DIM, alpha = 1 } = {}) {
+  x.save();
+  x.globalAlpha = alpha;
+  x.font = `400 ${size}px ${FONT_M}`;
+  const t = text.toUpperCase();
+  const tw = [...t].reduce((a, ch) => a + x.measureText(ch).width + 1.6, -1.6);
+  const w = tw + pad * 2;
+  x.strokeStyle = stroke; x.lineWidth = 1.5;
+  x.strokeRect(px + 0.5, y + 0.5, w, h);
+  line(x, t, { font: FONT_M, size, color, x: px + pad, y: y + h / 2 + size * 0.36, track: 1.6 });
+  x.restore();
+  return w;
+}
