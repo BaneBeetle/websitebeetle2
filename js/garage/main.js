@@ -1095,7 +1095,20 @@ async function start() {
        intersectPlane below does not mutate the ray, so this is free. */
     if (!(hoverTick = (hoverTick + 1) % 3) && !buttonsLocked) {
       const h = lookRay.intersectObjects(targets, false)[0];
-      const id = h ? h.object.userData.hit : null;
+      const hit = h ? h.object.userData.hit : null;
+      /* An affordance is a promise that something opens, and it is a lie
+         when you are already inside the thing. A hotspot named after a
+         station is the one kind that only ever re-enters it: handle()
+         sends every such id down its default goto(id), so hitting the
+         bench from the bench goes nowhere new. Gate on POI rather than a
+         list, because POI IS the set of names goto() answers to — which
+         is also why nothing else gets caught here. 'hood' still toggles,
+         'spec-*' still open panels, 'paper' opens the wall's paper
+         variant, 'horn'/'lamp'/'rev'/'lights' are actions: not one of
+         them names a station, so all of them keep their affordance.
+         Only the promise is dropped. The click is untouched, so the
+         bench at the bench still reopens its index. */
+      const id = (hit === mode && POI[hit]) ? null : hit;
       if (id !== hoverId) {
         setHover(hoverId, false);
         hoverId = id;
