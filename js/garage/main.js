@@ -23,7 +23,15 @@ const QUERY = new URLSearchParams(location.search);
    means it renders one expensive second before the first window closes and
    drops it anyway, and that second is the first one anybody sees.
    ?q=high|med|low pins a tier instead, which is what makes a screenshot
-   reproducible: a pinned tier is never demoted. */
+   reproducible: a pinned tier is never demoted.
+
+   What this guess is allowed to decide is COST: the composer, the mirror,
+   the shadow map, the pixel-ratio cap. It is not allowed to decide whether
+   the room is alive, because it is only a guess and a still robot is not a
+   cheaper robot. Every phone is a coarse pointer with four reported cores,
+   so a classification that gates motion parks the whole shop on the entire
+   mobile web before a single frame has been timed. That gate is `life`,
+   down in the ladder, and only a measured window moves it. */
 const TIER_BY_NAME = { high: 3, med: 2, low: 1 };
 const FORCED_TIER = TIER_BY_NAME[QUERY.get('q')];
 const TIER_PINNED = FORCED_TIER != null;
@@ -908,9 +916,34 @@ async function start() {
   /* Never show a weak machine an ugly version, only a simpler pretty one. */
   let tier = startTier, frames = 0, windowStart = performance.now();
 
+  /* A second, much shorter ladder, because one number was being asked two
+     different questions and could only answer one of them.
+
+     `tier` is how EXPENSIVE the room is allowed to LOOK, and guessing at
+     that from a core count is fine: the worst a wrong guess costs is a
+     composer that was not needed, or a mirror that would have been
+     affordable after all.
+
+     `life` is whether the room MOVES, and a guess is not good enough for
+     that, because there is nothing to buy. Every ambient machine is
+     already submitted at every tier that shows it, so holding one still
+     saves no draw call, no triangle, no program: the pup's stride is a
+     few dozen float writes onto meshes the frame is drawing anyway, the
+     printer's growth is a setDrawRange on geometry already uploaded, the
+     film is a texture offset, the board repaints only on the second it
+     changes. A frozen garage does not cost less than a moving one. It is
+     the same garage with the robots dead in it, which is the one version
+     of this room that is not worth shipping.
+
+     So `life` starts full for every CLASSIFIED device, and only a
+     MEASURED window may take it down. A phone gets its dog; a machine
+     that has actually been caught missing frames still loses it. */
+  let life = 2;      // 2 running, 1 held still, 0 hidden
+
   /* What a tier COSTS lives here; when we drop a tier still lives in
-     checkPerf. One ladder: a second one that also decided which effects
-     were on would disagree with this one the first time either changed.
+     checkPerf. One ladder for cost: a second one that also decided which
+     effects were on would disagree with this one the first time either
+     changed.
      Written as "what is true at tier N" rather than as a list of things to
      switch off on the way down, so starting at tier 1 and falling to tier 1
      produce the same room. */
@@ -986,6 +1019,17 @@ async function start() {
     else if (fps < 30 && tier === 2) tier = 1;
     else if (fps < 20 && tier === 1) tier = 0;
     if (tier !== was) applyTier();
+    /* The life ladder reads the same window on its own thresholds rather
+       than being derived from `tier`, because `tier` cannot express it: a
+       phone classified straight onto rung 1 has no rung left to fall
+       through, so following it down would take that phone from a full
+       room to a hidden one in a single window with no still frame in
+       between. These are the two rates the tier ladder already freezes
+       and hides at, so a machine that starts at 3 and measures its way
+       all the way down loses exactly what it always lost, at exactly the
+       frame rate it always lost it. */
+    if (fps < 30 && life === 2) life = 1;
+    else if (fps < 20 && life === 1) life = 0;
   }
 
   applyTier();
@@ -1141,11 +1185,18 @@ async function start() {
       bayHot = !!hot;
     }
 
-    if (tier >= 2) dressing.blades.rotation.z -= dt * 7.4;
+    if (life >= 2) dressing.blades.rotation.z -= dt * 7.4;
     /* The bench arc is always on, even when nobody is reading it. Below
        tier 2, or under reduced motion, the panes stay lit but hold
        perfectly still: no shimmer, no drift, no turntable. Crossfades
-       still finish, because a half-changed pane is a bug, not a flourish. */
+       still finish, because a half-changed pane is a bug, not a flourish.
+
+       The one ambient thing deliberately left on `tier` rather than moved
+       to `life`. Its off branch does not only stop a 5 mm sine bob, it
+       also takes down four additive cones (see step() in props.js), and
+       overdraw is exactly the kind of cost a classified tier is entitled
+       to decide. Splitting the two apart is a change to the prop, not to
+       the ladder. */
     bench.holo.step(clock.t, dt, tier >= 2 && !reduced);
     // sound the horn and the door opener notices, which is the whole point
     // of the Carbeetle project sitting on the ceiling above you
@@ -1269,7 +1320,7 @@ async function start() {
        second, so the sequence reads as a machine ticking rather than a
        slideshow. The flash windows are scaled to the shorter step so the
        moment of arrival still lands instead of clipping. */
-    if (tier >= 2) {
+    if (life >= 2) {
       const STEP = 1.0;
       boardT += dt;
       const phaseNow = Math.floor(boardT / STEP) % 4;
@@ -1287,17 +1338,19 @@ async function start() {
     /* the field-test clip walks at the rate it was filmed. Under reduced
        motion it holds on the first frame, which is still a photograph of
        the robot rather than an empty frame. */
-    if (tier >= 2 && !reduced) {
+    if (life >= 2 && !reduced) {
       filmT += dt;
       const n = Math.floor(filmT * dog.film.fps) % dog.film.count;
       if (n !== filmN) { filmN = n; dog.film.show(n); }
     }
 
     /* ---------------------------------------------- ambient machines */
-    /* Held still on a weak machine and parked outright when the visitor
-       has asked for less motion, in which case both sit in the pose they
-       hold at t=0 rather than snapping to a second one. */
-    if (tier >= 2 && !reduced) {
+    /* Held still on a machine MEASURED slow and parked outright when the
+       visitor has asked for less motion, in which case both sit in the
+       pose they hold at t=0 rather than snapping to a second one. A
+       machine that has merely been classified cheap still gets all of
+       this: see `life` above for why holding it still bought nothing. */
+    if (life >= 2 && !reduced) {
       const P = pup.sample(clock.t);
       const u = (P.s / pup.len) % 1;
       pup.curve.getPointAt(u, pupPos);
@@ -1744,18 +1797,18 @@ async function start() {
          lift the arm's status light takes. */
       printer.step(clock.t, nightMode);
     }
-    pup.group.visible = tier >= 1;
-    arm.group.visible = tier >= 1;
-    drone.group.visible = tier >= 1;
-    drone.shadow.visible = tier >= 1;
-    printer.group.visible = tier >= 1;
+    pup.group.visible = life >= 1;
+    arm.group.visible = life >= 1;
+    drone.group.visible = life >= 1;
+    drone.shadow.visible = life >= 1;
+    printer.group.visible = life >= 1;
     /* The scan is gated exactly where its driver is, and unconditionally,
-       so dropping a tier or asking for less motion cannot leave a beam
+       so dropping a rung or asking for less motion cannot leave a beam
        lit on the last values it was handed. */
-    drone.scan.root.visible = tier >= 2 && !reduced;
+    drone.scan.root.visible = life >= 2 && !reduced;
     /* The eye and its yoke are hardware, so they stay on screen when the
        scan is retired and have to be put back by hand: otherwise dropping
-       a tier mid recognition parks the drone with its head cocked at
+       a rung mid recognition parks the drone with its head cocked at
        something it can no longer see, lit green, for the rest of the
        session. */
     if (!drone.scan.root.visible && scanAim !== 0) {
@@ -1899,6 +1952,7 @@ async function start() {
     cursor(x, y) { pointerNdc.set(x, y); },
     get boardPhase() { return boardPhase; },
     get tier() { return tier; },
+    get life() { return life; },
     get filmFrame() { return filmN; },
     get locked() { return buttonsLocked; },
     unlock() { buttonsLocked = false; },
@@ -1910,6 +1964,11 @@ async function start() {
     },
     get post() { return post; },
     setTier(t) { tier = t; applyTier(); },
+    /* Nothing to apply: every consumer of `life` is read once a frame in
+       frame(), so setting it here is the same thing a measured demotion
+       does. This is how the bottom two rungs get verified without having
+       to actually make the machine slow. */
+    setLife(v) { life = v; },
     ready: true,
   };
 
