@@ -34,6 +34,98 @@
       if (b) b.hidden = false;
     });
   }
+
+  /* ------------------------------------------------------- the ledger */
+  /* The loading bar has to start being honest before main.js exists,
+     because on a slow line the module graph IS the first third of the
+     wait: 1.3 MB of three plus this room's own code, about ten seconds
+     on Fast 3G, during which nothing that could move a bar has been
+     parsed yet. So the counting starts here, in the one script that is
+     already running, and main.js takes the bar over when it arrives.
+
+     What it counts is bytes that have actually landed. PerformanceObserver
+     reports every subresource the page fetches as it completes, and
+     decodedBodySize is the size on disk regardless of what the wire did
+     with it - which matters, because production serves all of this
+     brotli-compressed with no Content-Length at all, so the compressed
+     number is neither knowable up front nor comparable to the constants
+     below. Same-origin only: cross-origin entries report zero for the
+     body sizes and would drag the total backwards. */
+  var B = window.__boot = {
+    /* pathname -> decoded bytes, filled in as each file lands. main.js
+       reads this for the later phases rather than counting again. */
+    bytes: {},
+    p: 0,
+    px: -1,
+    /* The bar's first quarter, and the boundary main.js starts from.
+       Chosen from a measured cold load rather than by feel: on Fast 3G
+       the module graph is 9.9 s of a 30.4 s boot and 1.31 MB of the
+       4.44 MB the boot moves, and both readings land on very close to a
+       quarter. Defined here rather than beside the observer so that a
+       browser without PerformanceObserver still hands main.js a number
+       to build its segments on - it just starts the bar at 25%. */
+    end: 0.25,
+    el: null,
+    pct: null,
+    /* main.js parks a summing function here for the phases it is waiting
+       on, so the later segments advance on the same responses this
+       observer is already being handed rather than on a timer. */
+    on: null,
+    got: function (match) {
+      var g = 0;
+      for (var k in B.bytes) if (match(k)) g += B.bytes[k];
+      return g;
+    },
+    /* Monotonic by construction. Progress is a promise, and a bar that
+       can go backwards has broken it once already by the time anybody
+       notices the number. */
+    set: function (v) {
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+      if (v <= B.p) return;
+      B.p = v;
+      if (!B.el) { B.el = document.querySelector('.boot'); B.pct = document.querySelector('.boot-pct'); }
+      if (!B.el) return;
+      B.el.style.setProperty('--load', String(v));
+      /* the roller door rises on the same value, so the picture and the
+         number cannot tell two different stories */
+      B.el.style.setProperty('--door', String(v * 0.58));
+      var n = Math.round(v * 100);
+      if (n !== B.px && B.pct) { B.px = n; B.pct.textContent = String(n).padStart(2, '0'); }
+    },
+    stop: function () { if (B.obs) { B.obs.disconnect(); B.obs = null; } },
+  };
+
+  if (ok && typeof PerformanceObserver === 'function') {
+    /* Every byte of the static import graph, measured off the files on
+       disk. Advisory: it is read as a denominator and the result is
+       clamped, so if this drifts out of date the crawl runs a little
+       fast or a little slow and then waits at the segment's edge for the
+       modules to actually finish. It can never overrun the segment and
+       it can never reverse. Regenerate by summing the graph from
+       js/garage/main.js. */
+    var MODULE_BYTES = 1313991;   // 16 files, 2026-08-27
+    /* post.js and its ten passes are a separate, later phase and are
+       fetched only on tier 2 and up, so they are not part of this
+       denominator even though they are also .js under /js/. */
+    var isPost = function (p) {
+      return p.indexOf('/postprocessing/') >= 0 || p.indexOf('/shaders/') >= 0 ||
+             p.indexOf('/js/garage/post.js') >= 0;
+    };
+    B.obs = new PerformanceObserver(function (list) {
+      var e = list.getEntries(), i, u;
+      for (i = 0; i < e.length; i++) {
+        try { u = new URL(e[i].name, location.href); } catch (err) { continue; }
+        if (u.origin !== location.origin) continue;
+        B.bytes[u.pathname] = e[i].decodedBodySize || e[i].encodedBodySize || 0;
+      }
+      B.set(Math.min(1, B.got(function (p) {
+        return p.slice(-3) === '.js' && !isPost(p);
+      }) / MODULE_BYTES) * B.end);
+      if (B.on) B.on();
+    });
+    /* buffered, because the first modules can land before this runs */
+    try { B.obs.observe({ type: 'resource', buffered: true }); } catch (err) { B.obs = null; }
+  }
 })();
 </script>
 </head>
