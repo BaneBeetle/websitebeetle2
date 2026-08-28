@@ -25,11 +25,99 @@ export const HOOD_OPEN = -0.80;
 const PAINT = 0x17255e;          // Interlagos Blue
 const CARBON = 0x1b1e24;
 
-export async function loadCar(scene, onProgress) {
-  const gltf = await new Promise((res, rej) => {
-    new GLTFLoader().load('models/bmw_m3_e46/scene.gltf', res,
-      (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); }, rej);
+/* ---- what the car weighs ------------------------------------------- */
+
+const MODEL = 'models/bmw_m3_e46/';
+
+/* Measured off the files on disk, 2026-08-27, and advisory: these are a
+   denominator, and loadCar clamps the fraction it reports to [0,1], so a
+   number that has drifted makes the bar crawl a little fast or a little
+   slow and then hold at the edge until the load really finishes. It
+   cannot run the bar backwards and it cannot run it past this segment.
+
+   They have to be baked because nothing on the wire will say. Production
+   serves this model brotli-encoded with no Content-Length header at all,
+   which is what made the old bar lie: three builds its ProgressEvent with
+   `lengthComputable: !!contentLength`, so every event arrived false and
+   the one line that read them never ran. The bytes were always there in
+   `loaded`; only the total was missing, and the total is right here. */
+const BYTES = {
+  'scene.gltf': 53333,
+  'scene.bin': 1513776,
+  'textures/Material.002_baseColor.png': 24941,
+  'textures/Material.029_baseColor.png': 90616,
+  'textures/blinker_glass_normal.png': 30752,
+  'textures/logo_baseColor.png': 124325,
+  'textures/rubber.001_normal.png': 848677,
+  'textures/taillight_baseColor.png': 131220,
+};
+const TOTAL = Object.values(BYTES).reduce((a, b) => a + b, 0);   // 2,817,640
+
+/* The download, counted twice over because its two halves report through
+   different doors and neither one alone is the truth.
+
+   GLTFLoader hands its onProgress to the .gltf and to nothing else, so
+   the 53 KB of JSON was the only thing the old bar could ever have seen
+   even with a Content-Length: the 1.5 MB buffer and the 1.2 MB of PNGs
+   are fetched by the parser afterwards, out of the caller's reach.
+
+   So the buffer is fetched here instead, by a FileLoader that reports
+   `loaded` on every chunk whatever the headers say, and parked in
+   THREE.Cache under the key GLTFLoader will ask for. The parser then
+   finds it already there and never asks the network - verified: eight
+   requests to /models/ for eight files, no duplicate.
+
+   The textures cannot be counted this way. GLTFLoader loads them through
+   ImageBitmapLoader, which fetches without reporting and whose cache
+   holds decoded bitmaps, so pre-baking one means matching three's
+   createImageBitmap options exactly or quietly changing how the paint
+   looks. They go through the LoadingManager instead and are credited
+   whole, at their known size, as each finishes. Six steps rather than a
+   stream - but they download alongside the buffer, whose stream is
+   moving the whole time, so the bar never waits on one of them. */
+function loadModel(onProgress) {
+  let streamed = 0, whole = 0, last = -1;
+  const tell = () => {
+    if (!onProgress) return;
+    const p = Math.max(0, Math.min(1, (streamed + whole) / TOTAL));
+    if (p > last) { last = p; onProgress(p); }
+  };
+
+  const manager = new THREE.LoadingManager();
+  manager.onProgress = (url) => {
+    const i = url.indexOf(MODEL);
+    const key = i < 0 ? url : url.slice(i + MODEL.length);
+    // the buffer is already being counted by the byte, and the manager
+    // sees it twice anyway: once for the fetch, once for the cache hit
+    if (key !== 'scene.bin' && BYTES[key] != null) { whole += BYTES[key]; tell(); }
+  };
+
+  const cached = THREE.Cache.enabled;
+  THREE.Cache.enabled = true;
+  const buf = new THREE.FileLoader(manager);
+  buf.setResponseType('arraybuffer');
+  buf.load(MODEL + 'scene.bin', () => { streamed = BYTES['scene.bin']; tell(); },
+    (e) => { streamed = Math.min(BYTES['scene.bin'], e.loaded); tell(); },
+    /* A failed prefetch is not a failed load: the parser will ask for the
+       buffer itself and get a real error if it is genuinely gone. All
+       that is lost here is the counting, and the bar holds where it got
+       to rather than inventing the rest. */
+    () => {});
+
+  return new Promise((res, rej) => {
+    new GLTFLoader(manager).load(MODEL + 'scene.gltf', res, undefined, rej);
+  }).finally(() => {
+    /* Hand the 1.5 MB back. THREE.Cache keeps whatever it is given for
+       the life of the page, and this buffer had exactly one reader,
+       which has now read it - holding it would be a megabyte and a half
+       of resident memory bought purely to have counted it. */
+    THREE.Cache.remove('file:' + MODEL + 'scene.bin');
+    THREE.Cache.enabled = cached;
   });
+}
+
+export async function loadCar(scene, onProgress) {
+  const gltf = await loadModel(onProgress);
 
   const car = gltf.scene;
   car.name = 'carbeetle';

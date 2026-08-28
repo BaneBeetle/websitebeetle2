@@ -104,7 +104,13 @@ p{margin:0 0 1em}
 }
 .boot-meter b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
 .boot-bar{flex:1;height:2px;background:var(--line);position:relative;overflow:hidden}
-.boot-bar i{position:absolute;inset:0 auto 0 0;width:calc(var(--load,0) * 100%);background:var(--blue-lit);transition:width .3s linear}
+/* Linear, and short. Linear because the fill is restarted dozens of times
+   a second while the model streams and an ease would relight its curve on
+   every one of them; short because the last move is a jump from 92 to 100
+   taken the instant the shader precompile returns, and the button appears
+   in the same breath - a third of a second of fill still crawling under a
+   button that says the room is ready is the two of them disagreeing. */
+.boot-bar i{position:absolute;inset:0 auto 0 0;width:calc(var(--load,0) * 100%);background:var(--blue-lit);transition:width .18s linear}
 .boot-start{
   margin-top:26px;
   font-family:var(--display);text-transform:uppercase;letter-spacing:.06em;

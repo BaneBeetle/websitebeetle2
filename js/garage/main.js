@@ -92,7 +92,6 @@ const POSE = QUERY.get('pose');
 const $ = (s) => document.querySelector(s);
 const boot = $('.boot');
 const bar = $('.boot-bar');
-const pct = $('.boot-pct');
 const startBtn = $('.boot-start');
 const bootNote = $('.boot-note');
 const panel = $('.panel');
@@ -102,12 +101,82 @@ const hint = $('.hint');
 
 /* ------------------------------------------------------------- boot */
 
-let progress = 0;
-function setProgress(v) {
-  progress = Math.max(progress, Math.min(1, v));
-  boot.style.setProperty('--load', String(progress));
-  boot.style.setProperty('--door', String(progress * 0.58));
-  if (pct) pct.textContent = String(Math.round(progress * 100)).padStart(2, '0');
+/* The bar has been running since before this file was parsed: the ledger
+   in index.html has been counting the module graph down the wire and
+   painting the first quarter. It owns the DOM writes, here too, so the
+   value on screen has exactly one author and cannot be walked backwards
+   by whichever of us wrote last. BOOT.end is where its quarter stops and
+   this file's segments start. */
+const BOOT = window.__boot;
+const setProgress = (v) => { if (BOOT) BOOT.set(v); };
+
+/* What the boot is made of, and what each part is worth.
+
+   Every one of these numbers came off a measured cold load rather than
+   out of the air, because the old ones did not: 0.10, then 0.65, then
+   0.70, 0.92, 1.0 described a shape the boot does not have. On Fast 3G
+   the phases below actually cost 9.9 s / 2.0 / 1.9 / 0.02 / 16.1 / 0.08 /
+   0.40, and they move 1.31 MB / 55 KB / 249 KB / 0 / 2.82 MB / 0 / 0.
+
+   The four that wait on the network are weighted by their bytes, because
+   bytes are what changes when the line does. The three that burn CPU are
+   weighted by their milliseconds, because those barely move with the
+   line at all - the precompile is 1.3% of a throttled boot and 63% of a
+   local one, and it is the second number that decides whether the bar is
+   allowed to be full while it runs. It is not. It gets 8%.
+
+   Weights are relative and get normalised across whichever phases will
+   actually run, so the low path skipping the composer and the concrete
+   does not leave a hole in the middle of the bar. */
+const WEIGHT = { post: 4, floor: 5, room: 1, car: 51, build: 6, warm: 8 };
+
+/* Where each phase starts and ends on the bar, given the tier. */
+function segments(tier) {
+  const live = Object.keys(WEIGHT).filter(
+    (k) => (k === 'post' || k === 'floor' ? tier >= 2 : true));
+  const sum = live.reduce((a, k) => a + WEIGHT[k], 0);
+  const head = (BOOT && BOOT.end) || 0.25;
+  const out = {};
+  let at = head;
+  for (const k of live) {
+    const span = (1 - head) * WEIGHT[k] / sum;
+    out[k] = { at, to: at + span };
+    at += span;
+  }
+  /* the last phase ends exactly at 1, not at 0.9999999 */
+  out[live[live.length - 1]].to = 1;
+  return out;
+}
+
+/* Advisory, same rule as the model's: a denominator, clamped, measured
+   off disk 2026-08-27. post.js and its ten passes; the three concrete
+   maps. Stale numbers move the crawl, not the truth. */
+const POST_BYTES = 54871;
+const FLOOR_BYTES = 249319;
+
+/* Watch a phase advance by the bytes that have landed for it. Nothing
+   here polls: the ledger's observer is already being woken by the same
+   responses, so this rides along and stops when the await returns. */
+function watchBytes(seg, total, match) {
+  if (!seg || !BOOT) return () => {};
+  const tick = () => setProgress(
+    seg.at + (seg.to - seg.at) * Math.min(1, BOOT.got(match) / total));
+  BOOT.on = tick;
+  tick();
+  return () => { if (BOOT.on === tick) BOOT.on = null; };
+}
+
+/* A milestone nobody can see is not a milestone. Everything from the car
+   landing to the start button is one synchronous block, so the bar's
+   last write before the task ends was the only value that ever reached a
+   paint: 0.70 and 0.92 were being written into a frame that did not
+   exist, and 100% was the first number anybody saw after 10%. This hands
+   a value to the compositor and comes back on the far side of the frame
+   it was drawn in - two callbacks, because the first still runs before
+   the paint it belongs to. */
+function paintProgress(v) {
+  setProgress(v);
+  return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
 
 if (document.documentElement.classList.contains('has-gl')) {
@@ -210,19 +279,45 @@ async function start() {
      A failure here is not fatal either: the slab falls back to the
      painted-only version it has always had, which is why this is a catch
      and not an await that can reject the boot. */
+  /* The bar's own map of the rest of the boot. Which phases exist depends
+     on the tier - the low path fetches neither the composer nor the
+     concrete - so the map is built here, where the tier is finally known,
+     and the weights normalise over whatever is left.
+
+     This file running at all is proof that the module graph has finished
+     downloading, which is a better fact than any byte count of it, so the
+     ledger's opening quarter is closed on that rather than on its own
+     arithmetic. The observer stays running: the phases below are still
+     counted off the responses it is being handed. */
+  const SEG = segments(startTier);
+  if (BOOT) setProgress(BOOT.end);
+
   /* The composer and the eleven vendored modules behind it are 55 KB that
      the bottom rung will never run: the ladder only ever demotes, so a
      machine that starts at tier 1 cannot later climb to a tier that wants
      them. Imported dynamically so that machine never fetches them at all,
      which is most of what "the low path stays light" has to mean when the
      alternative is downloading a bloom pass in order not to use it. */
+  /* Both of these are fetched by loaders with no progress callback worth
+     the name - a dynamic import reports nothing at all, and loadFloorMaps
+     goes through Image and TextureLoader, which report on completion or
+     not at all. The ledger already knows what landed and when, though,
+     because PerformanceObserver saw the responses; so they are watched
+     from the outside, by their bytes, while the await runs. */
+  const post0 = watchBytes(SEG.post, POST_BYTES, (p) => p.endsWith('.js') &&
+    (p.includes('/postprocessing/') || p.includes('/shaders/') || p.endsWith('/post.js')));
   const Post = startTier >= 2 ? await import('./post.js') : null;
+  post0();
+  if (SEG.post) setProgress(SEG.post.to);
 
+  const floor0 = watchBytes(SEG.floor, FLOOR_BYTES, (p) => p.startsWith('/img/tex/'));
   const floorMaps = startTier <= 1 ? null : await loadFloorMaps(
     renderer.capabilities.getMaxAnisotropy()).catch((e) => {
     console.warn('garage: concrete maps unavailable, painted floor only', e);
     return null;
   });
+  floor0();
+  if (SEG.floor) setProgress(SEG.floor.to);
 
   /* Texture detail follows the SCREEN, not just the tier. A good phone
      earns tier 2 and can run the composer, but it is still a tiled GPU
@@ -239,10 +334,15 @@ async function start() {
     lowDetail,
   });
   const lights = buildLights(scene);
-  setProgress(0.10);
+  setProgress(SEG.room.to);
 
-  const car = await loadCar(scene, (p) => setProgress(0.10 + p * 0.55));
-  setProgress(0.70);
+  /* 2.82 MB, and the only phase long enough on a slow line that anything
+     other than a real byte count would show. loadCar reports the fraction
+     of the model's bytes that have actually arrived - streamed for the
+     1.5 MB buffer, credited whole for each texture as it lands. */
+  const car = await loadCar(scene,
+    (p) => setProgress(SEG.car.at + (SEG.car.to - SEG.car.at) * p));
+  setProgress(SEG.car.to);
 
   /* Cheap floor reflection: one extra draw of the car, mirrored under
      the slab, composited through a slightly transparent floor. A full
@@ -358,7 +458,6 @@ async function start() {
   const qGround = new THREE.Quaternion(), qBeam = new THREE.Quaternion();
   const qAim = new THREE.Quaternion(), qTilt = new THREE.Quaternion();
   const qTmp = new THREE.Quaternion(), qYoke = new THREE.Quaternion();
-  setProgress(0.92);
 
   /* ---------------------------------------------------------- picking */
   /* Invisible hitboxes larger than the thing they stand for, so a hotspot
@@ -1059,6 +1158,17 @@ async function start() {
      which is how the first version of this still cost 248 ms with every
      program already cached. Wide and close enough to hold the whole
      engine bay, restored before anything else reads the camera. */
+  /* Measured at 332 ms on an M5 with nothing throttled, where it is 63%
+     of the whole boot - by far the most expensive thing this sequence
+     does once the files are local. It used to run here anyway, but
+     between two writes to a bar that could not paint either of them, so
+     it was a third of a second of work happening under a number that had
+     not moved since 10%. Give it the last 8% of the bar and, more to the
+     point, give the browser the frame it needs to actually draw the 92%
+     first: the render below blocks the main thread from the moment it
+     starts, so a value written on the near side of it and not painted is
+     a value nobody ever sees. */
+  await paintProgress(SEG.build.to);
   if (car.bay && car.bay.group) {
     const wasVisible = car.bay.group.visible;
     const keep = { fov: camera.fov, pos: camera.position.clone(), quat: camera.quaternion.clone() };
@@ -1823,7 +1933,11 @@ async function start() {
   }
 
   /* ------------------------------------------------------ the ceremony */
+  /* 100% and the button are the same fact stated twice, so they are
+     written one after the other with nothing between them that could
+     let a frame land on only one of them. */
   setProgress(1);
+  if (BOOT) BOOT.stop();
   startBtn.hidden = false;
   startBtn.focus({ preventScroll: true });
   bootNote.textContent = 'One of the projects in this garage is the door opener.';
