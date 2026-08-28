@@ -1014,6 +1014,7 @@ async function start() {
   /* ------------------------------------------------------- perf ladder */
   /* Never show a weak machine an ugly version, only a simpler pretty one. */
   let tier = startTier, frames = 0, windowStart = performance.now();
+  let lastPerfNow = windowStart, maxGap = 0, lifeSlow = 0, lifeFast = 0;
 
   /* A second, much shorter ladder, because one number was being asked two
      different questions and could only answer one of them.
@@ -1101,15 +1102,21 @@ async function start() {
 
   function checkPerf(now) {
     frames++;
+    const gap = now - lastPerfNow;
+    lastPerfNow = now;
+    if (gap > maxGap) maxGap = gap;
     if (now - windowStart < 4000) return;
-    /* A window that ran long means rAF was not actually running for part
-       of it — a hidden tab, the boot screen, a sleeping laptop. Judging
-       it would punish the machine for time it never spent rendering, and
-       the ladder never climbs back up, so one polluted window used to
-       freeze every ambient machine for the rest of the session. */
-    if (now - windowStart > 8000) { frames = 0; windowStart = now; return; }
+    /* A polluted window is one rAF was not actually running through — a
+       hidden tab, the boot screen, a sleeping laptop. The old length test
+       (> 8 s) missed the 4-8 s band, which is exactly how long a person
+       reads the loader or glances at another tab, and one such window
+       froze the room for good. The gap test closes the band: a machine
+       that is merely slow never pauses for a full second between frames;
+       only a suspension does that, whatever the window's total length. */
+    const polluted = (now - windowStart > 8000) || maxGap > 1000;
     const fps = (frames * 1000) / (now - windowStart);
-    frames = 0; windowStart = now;
+    frames = 0; windowStart = now; maxGap = 0;
+    if (polluted) { lifeSlow = 0; lifeFast = 0; return; }
     // a tier asked for by hand is a tier we keep, or ?q= could not hold a
     // screenshot still long enough to compare it with anything
     if (TIER_PINNED) return;
@@ -1118,17 +1125,25 @@ async function start() {
     else if (fps < 30 && tier === 2) tier = 1;
     else if (fps < 20 && tier === 1) tier = 0;
     if (tier !== was) applyTier();
-    /* The life ladder reads the same window on its own thresholds rather
-       than being derived from `tier`, because `tier` cannot express it: a
-       phone classified straight onto rung 1 has no rung left to fall
-       through, so following it down would take that phone from a full
-       room to a hidden one in a single window with no still frame in
-       between. These are the two rates the tier ladder already freezes
-       and hides at, so a machine that starts at 3 and measures its way
-       all the way down loses exactly what it always lost, at exactly the
-       frame rate it always lost it. */
-    if (fps < 30 && life === 2) life = 1;
-    else if (fps < 20 && life === 1) life = 0;
+    /* The life ladder reads the same windows on its own terms rather than
+       being derived from `tier`, because `tier` cannot express it: a phone
+       classified straight onto rung 1 has no rung left to fall through.
+       Its thresholds sit BELOW the tier ladder's on purpose - iOS Low
+       Power Mode caps rAF at ~30 fps, so a threshold of 30 would freeze a
+       healthy capped phone; stilling the room is reserved for genuinely
+       dying, which freezing was measured to barely help anyway. Demotion
+       waits for two honest slow windows so a single odd one cannot still
+       the room, and because life carries none of tier's shader-recompile
+       baggage, two honest fast windows earn the motion back. */
+    if (life > 0 && fps < (life === 2 ? 26 : 18)) {
+      lifeFast = 0;
+      if (++lifeSlow >= 2) { lifeSlow = 0; life--; }
+    } else if (life < 2 && fps >= 40) {
+      lifeSlow = 0;
+      if (++lifeFast >= 2) { lifeFast = 0; life++; }
+    } else {
+      lifeSlow = 0; lifeFast = 0;
+    }
   }
 
   applyTier();
@@ -1946,6 +1961,9 @@ async function start() {
   function begin() {
     if (running) return;
     running = true;
+    /* The stopwatch has been running since page load; the room has not.
+       Start the first honest window here, not at the loader. */
+    frames = 0; windowStart = performance.now(); lastPerfNow = windowStart; maxGap = 0;
     shop.enable();
     sndBtn.setAttribute('aria-pressed', 'true');
     sndBtn.textContent = 'Sound on';
